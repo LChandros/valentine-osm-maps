@@ -1110,8 +1110,9 @@ def create_water_meshes(water_features, center_lat, center_lon, scale_factor=1.0
         f.write(f"Min area threshold: {config.water_min_area_m2} m²\n")
 
     meshes = []
+    polygons = []  # Store polygons for base plate cutouts
     # Map2model approach: water sits BELOW bed level (negative Z)
-    # This creates first-layer color change effect, no base cutouts needed
+    # Base plate has holes where water is, creating first-layer color change effect
     water_base_z = -0.80  # mm - BELOW print bed (map2model approach)
     water_top_z = -0.40   # mm - still BELOW bed level
     water_thickness = water_top_z - water_base_z  # 0.4mm thick
@@ -1164,6 +1165,9 @@ def create_water_meshes(water_features, center_lat, center_lon, scale_factor=1.0
                     area_after_m2 = area_after_mm2 / (scale_factor * scale_factor)
                     f.write(f"  → Feature {i} after clipping: {area_after_m2:.2f} m² (was {area_m2:.2f} m²)\n")
 
+            # Store polygon for base plate cutouts
+            polygons.append(polygon)
+
             # Create thin flat mesh at elevated height
             coords = list(polygon.exterior.coords[:-1])
             n_points = len(coords)
@@ -1210,9 +1214,9 @@ def create_water_meshes(water_features, center_lat, center_lon, scale_factor=1.0
 
     # DEBUG LOGGING
     with open('/tmp/water_debug.log', 'a') as f:
-        f.write(f"Final result: {len(meshes)} meshes, total faces: {sum(len(m.faces) for m in meshes)}\n")
+        f.write(f"Final result: {len(meshes)} meshes, {len(polygons)} polygons, total faces: {sum(len(m.faces) for m in meshes)}\n")
 
-    return meshes
+    return meshes, polygons
 
 
 def create_park_meshes(parks, center_lat, center_lon, scale_factor=1.0, circle_boundary=None, config=None):
@@ -1462,18 +1466,18 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
 
 def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     """
-    Create a circular base plate (map2model approach: no cutouts needed).
+    Create a circular base plate with water cutouts (map2model approach).
 
     Structure:
-    - Circular base from z = -thickness_mm to z = 0
+    - Circular base from z = 0 to z = +thickness_mm (ABOVE bed level)
     - Water sits BELOW bed at z=-0.80 to -0.40 (negative Z)
-    - Everything else sits ON bed at z=0+ (positive Z)
-    - No cutouts needed - water appears as first-layer color change
+    - Base has HOLES where water is located (boolean difference)
+    - Water visible through holes as first-layer color change
 
     Args:
         size_mm: Diameter of base plate
         thickness_mm: Thickness of base (default 1mm)
-        water_polygons: Legacy parameter (no longer used - kept for compatibility)
+        water_polygons: List of Shapely polygons to cut from base (water locations)
     """
     from shapely.geometry import Polygon, Point
     from shapely.ops import unary_union
@@ -1512,11 +1516,9 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
 
         # Extrude the 2D polygon (with holes) into 3D
         # This handles complex polygons with holes automatically
+        # Trimesh extrudes upward from z=0, which is exactly what we want
+        # (base goes from z=0 to z=+thickness_mm, exposing water at negative Z)
         mesh = extrude_polygon(base_polygon, height=thickness_mm)
-
-        # Trimesh extrudes upward, but we want it from -thickness to 0
-        # So translate it down
-        mesh.apply_translation([0, 0, -thickness_mm])
 
     except Exception as e:
         print(f"Warning: Failed to extrude base with holes: {e}")
@@ -1524,24 +1526,24 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
         vertices = []
         faces = []
 
-        # Bottom vertices
-        for x, y in circle_coords:
-            vertices.append([x, y, -thickness_mm])
-
-        # Top vertices
+        # Bottom vertices (at z=0, bed level)
         for x, y in circle_coords:
             vertices.append([x, y, 0])
 
+        # Top vertices (at z=+thickness_mm, above bed)
+        for x, y in circle_coords:
+            vertices.append([x, y, thickness_mm])
+
         # Bottom face (triangulated from center)
         bottom_center = len(vertices)
-        vertices.append([0, 0, -thickness_mm])
+        vertices.append([0, 0, 0])
         for i in range(resolution):
             next_i = (i + 1) % resolution
             faces.append([bottom_center, i, next_i])
 
         # Top face
         top_center = len(vertices)
-        vertices.append([0, 0, 0])
+        vertices.append([0, 0, thickness_mm])
         for i in range(resolution):
             next_i = (i + 1) % resolution
             faces.append([top_center, resolution + next_i, resolution + i])
@@ -1624,7 +1626,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
 
     # Create all mesh types FIRST (need water polygons before creating base)
     building_meshes = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
-    water_meshes = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary, config)
+    water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
     road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary, config)
     footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary, config) if config.footpath_enabled else []
@@ -1696,8 +1698,8 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
                 print(f"    → Keeping original {len(park_meshes)} park meshes")
                 # Keep original park meshes on failure
 
-    # Create solid base (no cutouts - water sits on top now)
-    base = create_base_plate(BASE_SIZE_MM, 1, water_polygons=[])
+    # Create base with cutouts for water (water sits below at negative Z, visible through holes)
+    base = create_base_plate(BASE_SIZE_MM, 1, water_polygons=water_polygons)
 
     # Center offset (will be applied to all)
     center_offset = None
