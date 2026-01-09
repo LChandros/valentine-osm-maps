@@ -2344,12 +2344,18 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     scene.export(scene_3mf_filepath, file_type='3mf')
     print(f"✓ Multi-color scene 3MF exported: {scene_3mf_filename}")
 
-    # Add multicolor 3MF and documentation to split ZIP
-    print(f"\nAdding documentation and multicolor 3MF to split ZIP...")
+    # Add multicolor 3MF, OBJ/MTL, and documentation to split ZIP
+    print(f"\nAdding documentation, multicolor 3MF, and OBJ/MTL to split ZIP...")
     with zipfile.ZipFile(zip_filepath, 'a', zipfile.ZIP_DEFLATED) as zipf:
         # Add multicolor 3MF
         zipf.write(scene_3mf_filepath, arcname='map_multicolor.3mf')
         print(f"  ✓ Added map_multicolor.3mf")
+
+        # Add OBJ+MTL files
+        zipf.write(obj_filepath, arcname=obj_filename)
+        print(f"  ✓ Added {obj_filename}")
+        zipf.write(mtl_filepath, arcname=mtl_filename)
+        print(f"  ✓ Added {mtl_filename}")
 
         # Add README
         readme_path = 'README_BAMBU.txt'
@@ -2370,9 +2376,12 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     print(f"  STL (preview): {stl_filename}")
     print(f"  3MF (download): {mf3_filename}")
     print(f"  PLY (full color): {ply_filename}")
+    print(f"  OBJ+MTL (Bambu Studio): {obj_filename} + {mtl_filename}")
     print(f"  Enhanced Split ZIP (Bambu Studio ready): {zip_filename}")
     print(f"    ├─ stl/ - Individual component STL files")
     print(f"    ├─ map_multicolor.3mf - Multi-color scene (single file import)")
+    print(f"    ├─ {obj_filename} - OBJ with materials")
+    print(f"    ├─ {mtl_filename} - Material definitions")
     print(f"    ├─ README_BAMBU.txt - Usage instructions")
     print(f"    └─ color_mapping.json - Color reference guide")
     print(f"Total faces: {len(combined.faces)}")
@@ -2384,6 +2393,8 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         'stl_filename': stl_filename,
         '3mf_filename': mf3_filename,
         'ply_filename': ply_filename,
+        'obj_filename': obj_filename,
+        'mtl_filename': mtl_filename,
         'split_zip': zip_filename,
         'feature_ranges': feature_ranges
     }
