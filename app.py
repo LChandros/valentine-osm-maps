@@ -1785,16 +1785,16 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # Calculate boundaries with proper gaps:
     # - Border ring occupies 70-75mm (5mm wide)
     # - Water stops at 70mm (inner edge of border)
-    # - Other features stop at 69mm (1mm gap before border for clean edges)
+    # - Other features stop at 68mm (2mm gap before border for absolutely clean edges)
     border_width_mm = 5.0  # mm
-    feature_gap_mm = 1.0  # mm - gap between features and border ring
+    feature_gap_mm = 2.0  # mm - gap between features and border ring (increased for clean edges)
 
     # Water boundary: clips to inner edge of border ring (70mm)
     water_radius_reduction_meters = border_width_mm / scale_factor
     water_radius_meters = radius_meters - water_radius_reduction_meters
     circle_boundary_water = create_circular_boundary(water_radius_meters, scale_factor)
 
-    # Feature boundary: clips with 1mm gap before border ring (69mm)
+    # Feature boundary: clips with 2mm gap before border ring (68mm)
     feature_radius_reduction_meters = (border_width_mm + feature_gap_mm) / scale_factor
     feature_radius_meters = radius_meters - feature_radius_reduction_meters
     circle_boundary = create_circular_boundary(feature_radius_meters, scale_factor)
@@ -1819,7 +1819,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # Create all mesh types FIRST (need water polygons before creating base)
     # IMPORTANT: Different boundaries for clean edges:
     # - Water: 70mm (inner edge of border ring)
-    # - Other features: 69mm (1mm gap before border ring)
+    # - Other features: 68mm (2mm gap before border ring)
     building_meshes = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
     water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_water, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
