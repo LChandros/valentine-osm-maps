@@ -639,7 +639,13 @@ def query_osm_water(lat, lon, radius_meters=300, config=None):
             footprint = [nodes[nid] for nid in node_ids if nid in nodes]
 
             if len(footprint) >= 3:
-                water_features.append({'footprint': footprint})
+                # Store waterway type for different filtering rules
+                tags = element['tags']
+                water_type = tags.get('waterway', tags.get('natural', 'unknown'))
+                water_features.append({
+                    'footprint': footprint,
+                    'water_type': water_type  # river, canal, water, etc.
+                })
 
     print(f"Found {len(water_features)} water features")
     return water_features
@@ -1139,15 +1145,24 @@ def create_water_meshes(water_features, center_lat, center_lon, scale_factor=1.0
             area_mm2 = polygon.area
             area_m2 = area_mm2 / (scale_factor * scale_factor)
 
+            # Different thresholds for different water types
+            # Rivers are linear features (long but narrow) - use very low threshold
+            # Lakes/ponds are area features - use higher threshold
+            water_type = feature.get('water_type', 'unknown')
+            if water_type in ['river', 'canal', 'stream']:
+                min_area_threshold = 10.0  # m² - very low for rivers (long but narrow)
+            else:
+                min_area_threshold = config.water_min_area_m2  # 100 m² for lakes/ponds
+
             # DEBUG LOGGING
             with open('/tmp/water_debug.log', 'a') as f:
-                f.write(f"Feature {i}: area_mm2={area_mm2:.2f}, area_m2={area_m2:.2f}, ")
-                if area_m2 < config.water_min_area_m2:
-                    f.write(f"FILTERED (< {config.water_min_area_m2})\n")
+                f.write(f"Feature {i} ({water_type}): area_mm2={area_mm2:.2f}, area_m2={area_m2:.2f}, threshold={min_area_threshold} m², ")
+                if area_m2 < min_area_threshold:
+                    f.write(f"FILTERED (< {min_area_threshold})\n")
                 else:
-                    f.write(f"KEPT (>= {config.water_min_area_m2})\n")
+                    f.write(f"KEPT (>= {min_area_threshold})\n")
 
-            if area_m2 < config.water_min_area_m2:
+            if area_m2 < min_area_threshold:
                 filtered_count += 1
                 continue
 
