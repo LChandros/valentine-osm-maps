@@ -223,9 +223,10 @@ def clip_polygon_to_circle(polygon, circle_boundary):
             return None
 
         # Handle MultiPolygon results
+        # IMPORTANT: Return ALL pieces, not just the largest!
+        # Discarding pieces causes missing water/park sections
         if intersection.geom_type == 'MultiPolygon':
-            # Return the largest polygon
-            return max(intersection.geoms, key=lambda p: p.area)
+            return intersection  # Return full MultiPolygon with all pieces
         elif intersection.geom_type == 'Polygon':
             return intersection
         else:
@@ -1168,37 +1169,49 @@ def create_water_meshes(water_features, center_lat, center_lon, scale_factor=1.0
             # Store polygon for base plate cutouts
             polygons.append(polygon)
 
-            # Create thin flat mesh at elevated height
-            coords = list(polygon.exterior.coords[:-1])
-            n_points = len(coords)
+            # Use extrude_polygon to properly handle both Polygon and MultiPolygon
+            # This automatically preserves all pieces when water is split by clipping
+            from trimesh.creation import extrude_polygon
 
-            if n_points < 3:
-                continue
+            try:
+                mesh = extrude_polygon(polygon, height=water_thickness)
+                # Position: bottom at water_base_z, top at water_top_z
+                mesh.apply_translation([0, 0, water_base_z])
+                meshes.append(mesh)
+            except Exception as e:
+                print(f"Warning: Failed to extrude water polygon: {e}")
+                # Fallback to manual triangulation for simple Polygon only
+                if polygon.geom_type == 'Polygon':
+                    coords = list(polygon.exterior.coords[:-1])
+                    n_points = len(coords)
 
-            vertices = []
-            # Bottom vertices (at water_base_z)
-            for x, y in coords:
-                vertices.append([x, y, water_base_z])
-            # Top vertices
-            for x, y in coords:
-                vertices.append([x, y, water_top_z])
+                    if n_points < 3:
+                        continue
 
-            # Create faces
-            faces = []
-            # Bottom face
-            for i in range(1, n_points - 1):
-                faces.append([0, i + 1, i])
-            # Top face
-            for i in range(1, n_points - 1):
-                faces.append([n_points, n_points + i, n_points + i + 1])
-            # Side faces
-            for i in range(n_points):
-                next_i = (i + 1) % n_points
-                faces.append([i, next_i, n_points + i])
-                faces.append([next_i, n_points + next_i, n_points + i])
+                    vertices = []
+                    # Bottom vertices (at water_base_z)
+                    for x, y in coords:
+                        vertices.append([x, y, water_base_z])
+                    # Top vertices
+                    for x, y in coords:
+                        vertices.append([x, y, water_top_z])
 
-            mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
-            meshes.append(mesh)
+                    # Create faces
+                    faces = []
+                    # Bottom face
+                    for i in range(1, n_points - 1):
+                        faces.append([0, i + 1, i])
+                    # Top face
+                    for i in range(1, n_points - 1):
+                        faces.append([n_points, n_points + i, n_points + i + 1])
+                    # Side faces
+                    for i in range(n_points):
+                        next_i = (i + 1) % n_points
+                        faces.append([i, next_i, n_points + i])
+                        faces.append([next_i, n_points + next_i, n_points + i])
+
+                    mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
+                    meshes.append(mesh)
 
             # DEBUG LOGGING
             with open('/tmp/water_debug.log', 'a') as f:
@@ -1870,15 +1883,12 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         with open('/tmp/export_debug.log', 'a') as f:
             f.write(f"NO WATER MESHES - water_meshes is empty or None\n")
 
-    # Layer 2: Base plate (z=-1.0 to z=0.0, with water cutouts)
-    base_colored = apply_vertex_colors([base], '#FFFFFF')  # White (map2model)
-    all_meshes.extend(base_colored)
-    feature_ranges['base_and_heart_faces'] = len(base.faces)
-
-    # Layer 2.5: Border ring (z=-1.0 to z=0.40, raised border around map)
-    border_colored = apply_vertex_colors([border_ring], '#FFFFFF')  # White (map2model)
-    all_meshes.extend(border_colored)
-    print(f"✓ Border ring: {len(border_ring.faces)} faces")
+    # Layer 2 & 2.5: Base plate and border ring (both white, same color component)
+    # IMPORTANT: Color them together so they get the same color ID in 3MF export
+    base_and_border_colored = apply_vertex_colors([base, border_ring], '#FFFFFF')  # White (map2model)
+    all_meshes.extend(base_and_border_colored)
+    feature_ranges['base_and_heart_faces'] = len(base.faces) + len(border_ring.faces)
+    print(f"✓ Base + Border ring: {len(base.faces)} + {len(border_ring.faces)} faces (same color)")
 
     # Layer 3: Parks (green spaces)
     if park_meshes:
