@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valentine's Day Map Generator - MVP</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: #0f1419;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            padding: 40px;
+            max-width: 1800px;
+            width: 100%;
+            border: 1px solid #2d3748;
+        }
+
+        h1 {
+            color: #ff6b6b;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            color: #a0aec0;
+            margin-bottom: 25px;
+            font-size: 14px;
+        }
+
+        /* Vertical layout for map and 3D viewer */
+        .viewer-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .viewer-panel {
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .viewer-header {
+            background: #1a202c;
+            padding: 10px 15px;
+            border-bottom: 2px solid #2d3748;
+            font-weight: 600;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+
+        /* Map Container */
+        #map {
+            height: 500px;
+            width: 100%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        /* 3D Viewer Container */
+        #viewer3d {
+            height: 700px;
+            width: 100%;
+            background: linear-gradient(180deg, #f5f5f5 0%, #ffffff 100%);
+            position: relative;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        #viewer3d canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+
+        #viewer3d .placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #999;
+        }
+
+        #viewer3d .placeholder-icon {
+            font-size: 64px;
+            margin-bottom: 15px;
+        }
+
+        #viewer3d .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .viewer-controls {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .viewer-btn {
+            background: #1a202c;
+            border: 2px solid #667eea;
+            color: #667eea;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .viewer-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        /* Search Box */
+        .search-container {
+            margin-bottom: 25px;
+            position: relative;
+        }
+
+        #addressSearch {
+            width: 100%;
+            padding: 12px 40px 12px 12px;
+            border: 2px solid #2d3748;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            background: #1a202c;
+            color: #e2e8f0;
+        }
+
+        #addressSearch:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #718096;
+            font-size: 18px;
+        }
+
+        .map-hint {
+            background: #2d3748;
+            border: 1px solid #4a5568;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #cbd5e0;
+        }
+
+        .map-hint strong {
+            color: #ff6b6b;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #e2e8f0;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #2d3748;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+            background: #1a202c;
+            color: #e2e8f0;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-hint {
+            font-size: 11px;
+            color: #718096;
+            margin-top: 4px;
+        }
+
+        /* Settings Panel Styles */
+        .settings-panel {
+            background: #1a202c;
+            border-radius: 12px;
+            padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+            border: 2px solid #2d3748;
+        }
+
+        .settings-section {
+            background: #0f1419;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #2d3748;
+        }
+
+        .settings-section summary {
+            padding: 12px 15px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            color: #e2e8f0;
+            user-select: none;
+            list-style: none;
+        }
+
+        .settings-section summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .settings-section summary:hover {
+            background: #1a202c;
+        }
+
+        .settings-content {
+            padding: 15px;
+            border-top: 1px solid #2d3748;
+        }
+
+        .setting-item {
+            margin-bottom: 15px;
+            display: grid;
+            grid-template-columns: 120px 1fr auto;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .setting-item label {
+            margin: 0;
+            font-size: 12px;
+            font-weight: 500;
+            color: #a0aec0;
+        }
+
+        .setting-item input[type="color"] {
+            width: 60px;
+            height: 35px;
+            border: 2px solid #2d3748;
+            border-radius: 6px;
+            cursor: pointer;
+            padding: 2px;
+            background: #1a202c;
+        }
+
+        .setting-item input[type="number"],
+        .setting-item input[type="range"] {
+            padding: 6px 10px;
+            font-size: 13px;
+        }
+
+        .setting-item .value-display {
+            font-size: 12px;
+            font-weight: 600;
+            color: #667eea;
+            min-width: 40px;
+        }
+
+        .checkbox-item {
+            grid-template-columns: 20px 1fr;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            cursor: pointer;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #e63946 0%, #f77f00 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(230, 57, 70, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .examples {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1a202c;
+            border-radius: 8px;
+            border: 1px solid #2d3748;
+        }
+
+        .examples h3 {
+            font-size: 14px;
+            color: #a0aec0;
+            margin-bottom: 10px;
+        }
+
+        .example-link {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #0f1419;
+            border: 1px solid #2d3748;
+            border-radius: 4px;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 12px;
+            margin: 4px;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+
+        .example-link:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .status.success {
+            background: #1a4d2e;
+            border: 1px solid #2d5f3e;
+            color: #81f081;
+            display: block;
+        }
+
+        .status.error {
+            background: #4d1a1a;
+            border: 1px solid #5f2d2d;
+            color: #f08181;
+            display: block;
+        }
+
+        .status.loading {
+            background: #1a3a4d;
+            border: 1px solid #2d4f5f;
+            color: #81d4f0;
+            display: block;
+        }
+
+        .download-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .download-link:hover {
+            background: #218838;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>❤️ Valentine's Day Map Generator</h1>
+        <p class="subtitle">Create a 3D-printable topographical map of your special place</p>
+
+        <div class="map-hint">
+            <strong>💡 Tip:</strong> Drag the ❤️ heart marker to your exact special location, or search for an address below
+        </div>
+
+        <!-- Address Search -->
+        <div class="search-container">
+            <input type="text" id="addressSearch" placeholder="Search for an address (e.g., 'Eiffel Tower, Paris' or '123 Main St, Pittsburgh')">
+            <span class="search-icon">🔍</span>
+        </div>
+
+        <!-- Side-by-side Map and 3D Viewer -->
+        <div class="viewer-grid">
+            <div class="viewer-panel">
+                <div class="viewer-header">🗺️ Interactive Map</div>
+                <div id="map"></div>
+            </div>
+            <div class="viewer-panel">
+                <div class="viewer-header">🎨 3D Preview</div>
+                <div id="viewer3d">
+                    <div class="placeholder">
+                        <div class="placeholder-icon">🏗️</div>
+                        <div>Generate a map to see 3D preview</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Form with Settings Panel -->
+        <div style="display: grid; grid-template-columns: 1fr 350px; gap: 20px; margin-bottom: 25px;">
+            <!-- Left: Location Controls -->
+            <div>
+                <form id="mapForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="lat">Latitude:</label>
+                            <input type="number" step="any" id="lat" name="lat" required placeholder="40.4406">
+                            <div class="input-hint">Updated from map</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="lon">Longitude:</label>
+                            <input type="number" step="any" id="lon" name="lon" required placeholder="-79.9959">
+                            <div class="input-hint">Updated from map</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="radius">Radius (meters):</label>
+                            <input type="number" id="radius" name="radius" value="200" min="100" max="1000">
+                            <div class="input-hint">Area size (100-1000m)</div>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="generateBtn">Generate 3D Map STL</button>
+                </form>
+            </div>
+
+            <!-- Right: Settings Panel -->
+            <div class="settings-panel">
+                <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #333;">⚙️ Model Settings</h3>
+
+                <!-- Buildings Section -->
+                <details class="settings-section" open>
+                    <summary>🏢 Buildings</summary>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <label for="buildingColor">Color:</label>
+                            <input type="color" id="buildingColor" value="#B8B8B8">
+                        </div>
+                        <div class="setting-item">
+                            <label for="buildingScale">Scale:</label>
+                            <input type="range" id="buildingScale" min="0.5" max="2.0" step="0.1" value="1.0">
+                            <span class="value-display">1.0x</span>
+                        </div>
+                        <div class="setting-item">
+                            <label for="buildingMinHeight">Min Height (mm):</label>
+                            <input type="number" id="buildingMinHeight" min="0.5" max="10" step="0.5" value="1.0">
+                        </div>
+                        <div class="setting-item checkbox-item">
+                            <input type="checkbox" id="buildingRoofs">
+                            <label for="buildingRoofs">Add Roofs</label>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- Roads Section -->
+                <details class="settings-section">
+                    <summary>🛣️ Roads</summary>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <label for="roadColor">Color:</label>
+                            <input type="color" id="roadColor" value="#262626">
+                        </div>
+                        <div class="setting-item">
+                            <label for="roadHeight">Height (mm):</label>
+                            <input type="number" id="roadHeight" min="0.1" max="5.0" step="0.1" value="0.60">
+                        </div>
+                        <div class="setting-item">
+                            <label for="roadWidthMult">Width Multiplier:</label>
+                            <input type="range" id="roadWidthMult" min="0.5" max="3.0" step="0.1" value="1.8">
+                            <span class="value-display">1.8x</span>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- Water Section -->
+                <details class="settings-section">
+                    <summary>💧 Water</summary>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <label for="waterColor">Color:</label>
+                            <input type="color" id="waterColor" value="#1479C6">
+                        </div>
+                        <div class="setting-item">
+                            <label for="waterHeight">Height (mm):</label>
+                            <input type="number" id="waterHeight" min="0.1" max="5.0" step="0.1" value="0.40">
+                        </div>
+                        <div class="setting-item">
+                            <label for="waterMinArea">Ignore Smaller Than (m²):</label>
+                            <input type="number" id="waterMinArea" min="1" max="10000" step="10" value="50">
+                        </div>
+                    </div>
+                </details>
+
+                <!-- Parks Section -->
+                <details class="settings-section">
+                    <summary>🌳 Parks</summary>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <label for="parkColor">Color:</label>
+                            <input type="color" id="parkColor" value="#0FE300">
+                        </div>
+                        <div class="setting-item">
+                            <label for="parkHeight">Height (mm):</label>
+                            <input type="number" id="parkHeight" min="0.1" max="5.0" step="0.1" value="0.40">
+                        </div>
+                    </div>
+                </details>
+
+                <!-- Footpaths Section -->
+                <details class="settings-section">
+                    <summary>🚶 Footpaths</summary>
+                    <div class="settings-content">
+                        <div class="setting-item checkbox-item">
+                            <input type="checkbox" id="footpathEnabled" checked>
+                            <label for="footpathEnabled">Enable Footpaths</label>
+                        </div>
+                        <div class="setting-item">
+                            <label for="footpathColor">Color:</label>
+                            <input type="color" id="footpathColor" value="#000000">
+                        </div>
+                        <div class="setting-item">
+                            <label for="footpathHeight">Height (mm):</label>
+                            <input type="number" id="footpathHeight" min="0.1" max="5.0" step="0.1" value="0.30">
+                        </div>
+                        <div class="setting-item">
+                            <label for="footpathWidth">Width (m):</label>
+                            <input type="number" id="footpathWidth" min="0.5" max="5.0" step="0.5" value="1.5">
+                        </div>
+                    </div>
+                </details>
+
+                <button id="resetSettings" style="width: 100%; margin-top: 10px; padding: 8px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                    Reset to Defaults
+                </button>
+            </div>
+        </div>
+
+        <div class="examples">
+            <h3>Example Locations:</h3>
+            <a class="example-link" onclick="fillExample(40.4406, -79.9959, 'Pittsburgh'); return false;">Pittsburgh</a>
+            <a class="example-link" onclick="fillExample(40.444217, -79.952722, 'Cathedral of Learning'); return false;">Cathedral of Learning</a>
+            <a class="example-link" onclick="fillExample(40.7128, -74.0060, 'NYC'); return false;">New York City</a>
+            <a class="example-link" onclick="fillExample(37.7749, -122.4194, 'San Francisco'); return false;">San Francisco</a>
+            <a class="example-link" onclick="fillExample(48.8584, 2.2945, 'Eiffel Tower'); return false;">Eiffel Tower</a>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Three.js and loaders via ES modules -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        // Import Three.js modules
+        import * as THREE from 'three';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Make THREE globally available for inline onclick handlers
+        window.THREE = THREE;
+
+        // ===== MAP INITIALIZATION =====
+        let map;
+        let marker;
+        let circle;
+
+        // Default location (Pittsburgh)
+        let currentLat = 40.4406;
+        let currentLon = -79.9959;
+        let currentRadius = 300;
+
+        // Initialize map
+        function initMap() {
+            // Create Leaflet map
+            map = L.map('map').setView([currentLat, currentLon], 15);
+
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            // Create custom heart icon
+            const heartIcon = L.divIcon({
+                className: 'heart-marker',
+                html: '❤️',
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -32]
+            });
+
+            // Add draggable marker
+            marker = L.marker([currentLat, currentLon], {
+                icon: heartIcon,
+                draggable: true
+            }).addTo(map);
+
+            marker.bindPopup('<b>Your Special Place ❤️</b><br>Drag me to adjust location!').openPopup();
+
+            // Add radius circle
+            circle = L.circle([currentLat, currentLon], {
+                radius: currentRadius,
+                color: '#e63946',
+                fillColor: '#e63946',
+                fillOpacity: 0.2,
+                weight: 2
+            }).addTo(map);
+
+            // Update coordinates when marker is dragged
+            marker.on('dragend', function(e) {
+                const lngLat = marker.getLatLng();
+                currentLat = lngLat.lat;
+                currentLon = lngLat.lng;
+                updateInputs();
+                updateCircle();
+            });
+
+            // Allow clicking on map to move marker
+            map.on('click', function(e) {
+                currentLat = e.latlng.lat;
+                currentLon = e.latlng.lng;
+                marker.setLatLng([currentLat, currentLon]);
+                updateInputs();
+                updateCircle();
+                marker.openPopup();
+            });
+        }
+
+
+        // Update input fields from map
+        function updateInputs() {
+            document.getElementById('lat').value = currentLat.toFixed(6);
+            document.getElementById('lon').value = currentLon.toFixed(6);
+        }
+
+        // Update circle when radius changes
+        function updateCircle() {
+            if (circle) {
+                circle.setLatLng([currentLat, currentLon]);
+                circle.setRadius(currentRadius);
+            }
+        }
+
+        // Update map when inputs change
+        document.getElementById('lat').addEventListener('change', function() {
+            const lat = parseFloat(this.value);
+            if (!isNaN(lat)) {
+                currentLat = lat;
+                marker.setLatLng([currentLat, currentLon]);
+                map.setView([currentLat, currentLon]);
+                updateCircle();
+            }
+        });
+
+        document.getElementById('lon').addEventListener('change', function() {
+            const lon = parseFloat(this.value);
+            if (!isNaN(lon)) {
+                currentLon = lon;
+                marker.setLatLng([currentLat, currentLon]);
+                map.setView([currentLat, currentLon]);
+                updateCircle();
+            }
+        });
+
+        document.getElementById('radius').addEventListener('input', function() {
+            currentRadius = parseInt(this.value);
+            updateCircle();
+        });
+
+        // ===== ADDRESS SEARCH =====
+        let searchTimeout;
+        document.getElementById('addressSearch').addEventListener('keyup', function(e) {
+            if (e.key === 'Enter') {
+                searchAddress(this.value);
+            } else {
+                // Debounce search
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    if (this.value.length > 3) {
+                        searchAddress(this.value);
+                    }
+                }, 1000);
+            }
+        });
+
+        async function searchAddress(query) {
+            if (!query) return;
+
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                const results = await response.json();
+
+                if (results && results.length > 0) {
+                    const result = results[0];
+                    currentLat = parseFloat(result.lat);
+                    currentLon = parseFloat(result.lon);
+
+                    marker.setLatLng([currentLat, currentLon]);
+                    map.setView([currentLat, currentLon], 15);
+                    updateInputs();
+                    updateCircle();
+                    marker.openPopup();
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+            }
+        }
+
+        // ===== EXAMPLE LOCATIONS =====
+        function fillExample(lat, lon, name) {
+            currentLat = lat;
+            currentLon = lon;
+            marker.setLatLng([lat, lon]);
+            map.setView([lat, lon], 15);
+            updateInputs();
+            updateCircle();
+            marker.bindPopup(`<b>${name} ❤️</b><br>Drag me to adjust!`).openPopup();
+            document.getElementById('addressSearch').value = name;
+        }
+        // Expose globally for onclick handlers
+        window.fillExample = fillExample;
+
+        // ===== 3D VIEWER INITIALIZATION =====
+        let scene, camera, renderer, controls, currentMeshes = [];
+
+        function init3DViewer() {
+            const container = document.getElementById('viewer3d');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xABCDEF); // Light blue
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 10000);
+            camera.position.set(200, 200, 200);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.innerHTML = ''; // Clear placeholder
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.1;  // Smooth deceleration
+            controls.screenSpacePanning = false;
+            controls.minDistance = 10;  // Allow MUCH closer zoom for fine details
+            controls.maxDistance = 1500;   // Allow further zoom out
+            controls.maxPolarAngle = Math.PI / 2;
+
+            // Disable OrbitControls zoom and use custom wheel handler
+            controls.enableZoom = false;  // Disable default zoom
+            controls.rotateSpeed = 0.5;
+            controls.panSpeed = 0.5;
+            controls.mouseButtons = {
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.PAN,
+                RIGHT: THREE.MOUSE.PAN
+            };
+
+            // Custom smooth zoom handler with much finer control
+            renderer.domElement.addEventListener('wheel', (event) => {
+                event.preventDefault();
+
+                // Calculate zoom delta - 10% faster than before
+                const delta = event.deltaY * 0.0011;  // 0.001 * 1.1 = 10% faster
+                const zoomFactor = Math.pow(0.95, delta);  // Smooth exponential zoom
+
+                // Get current camera distance
+                const currentDistance = camera.position.length();
+
+                // Apply zoom with limits (closer min, further max)
+                const newDistance = Math.max(10, Math.min(1500, currentDistance * zoomFactor));
+
+                // Update camera position
+                camera.position.multiplyScalar(newDistance / currentDistance);
+                camera.updateProjectionMatrix();
+                controls.update();
+            }, { passive: false });
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(100, 100, 50);
+            scene.add(directionalLight);
+
+            // Grid Helper - removed per user request
+
+            // Add control buttons
+            const controls_html = `
+                <div class="viewer-controls">
+                    <button class="viewer-btn" onclick="resetCamera()">Reset View</button>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', controls_html);
+
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(width, height);
+            });
+        }
+
+        function resetCamera() {
+            camera.position.set(200, 200, 200);
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+        // Expose globally for onclick handlers
+        window.resetCamera = resetCamera;
+
+        async function load3DPreview(data) {
+            const container = document.getElementById('viewer3d');
+
+            // Show loading indicator
+            container.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Loading 3D preview...</div>
+                </div>
+            `;
+
+            try {
+                // Initialize viewer if not already done
+                if (!renderer) {
+                    init3DViewer();
+                }
+
+                // Remove old meshes if exist
+                currentMeshes.forEach(mesh => scene.remove(mesh));
+                currentMeshes = [];
+
+                const { filename, feature_ranges, colors } = data;
+                const loader = new STLLoader();
+
+                console.log('Dynamic colors:', colors);
+
+                // Load the single combined STL
+                const geometry = await new Promise((resolve, reject) => {
+                    loader.load(`/download/${filename}`, resolve, undefined, reject);
+                });
+
+                console.log('✓ Loaded combined STL:', filename);
+
+                // Create material groups based on face ranges
+                // The backend concatenates in this order:
+                // 1. Base + heart
+                // 2. Buildings
+                // 3. Water
+                // 4. Parks
+                // 5. Roads
+
+                let faceIndex = 0;
+                const groups = [];
+
+                // LAYER ORDER matches backend: Water → Base → Parks → Roads → Footpaths → Buildings
+
+                // Group 0: Water (lowest layer - blue)
+                if (feature_ranges.water_faces > 0) {
+                    groups.push({
+                        start: faceIndex * 3,
+                        count: feature_ranges.water_faces * 3,
+                        materialIndex: 0
+                    });
+                    faceIndex += feature_ranges.water_faces;
+                }
+
+                // Group 1: Base plate (gray)
+                if (feature_ranges.base_and_heart_faces > 0) {
+                    groups.push({
+                        start: faceIndex * 3,
+                        count: feature_ranges.base_and_heart_faces * 3,
+                        materialIndex: 1
+                    });
+                    faceIndex += feature_ranges.base_and_heart_faces;
+                }
+
+                // Group 2: Parks (green)
+                if (feature_ranges.park_faces > 0) {
+                    groups.push({
+                        start: faceIndex * 3,
+                        count: feature_ranges.park_faces * 3,
+                        materialIndex: 2
+                    });
+                    faceIndex += feature_ranges.park_faces;
+                }
+
+                // Group 3: Roads (black)
+                if (feature_ranges.road_faces > 0) {
+                    groups.push({
+                        start: faceIndex * 3,
+                        count: feature_ranges.road_faces * 3,
+                        materialIndex: 3
+                    });
+                    faceIndex += feature_ranges.road_faces;
+                }
+
+                // Group 4: Footpaths (black)
+                if (feature_ranges.footpath_faces > 0) {
+                    groups.push({
+                        start: faceIndex * 3,
+                        count: feature_ranges.footpath_faces * 3,
+                        materialIndex: 4
+                    });
+                    faceIndex += feature_ranges.footpath_faces;
+                }
+
+                // Group 5: Buildings (highest layer - gray)
+                if (feature_ranges.building_faces > 0) {
+                    groups.push({
+                        start: faceIndex * 3,
+                        count: feature_ranges.building_faces * 3,
+                        materialIndex: 5
+                    });
+                    faceIndex += feature_ranges.building_faces;
+                }
+
+                // Clear existing groups and add our groups
+                geometry.clearGroups();
+                groups.forEach(g => {
+                    geometry.addGroup(g.start, g.count, g.materialIndex);
+                });
+
+                // Create materials array with dynamic colors from settings
+                // LAYER ORDER: Water → Base → Parks → Roads → Footpaths → Buildings
+                const materials = [
+                    // 0: Water (lowest layer - shiny, semi-transparent)
+                    new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(colors.water),
+                        specular: 0x555555,
+                        shininess: 50,
+                        transparent: true,
+                        opacity: 0.8
+                    }),
+                    // 1: Base plate (gray)
+                    new THREE.MeshPhongMaterial({
+                        color: 0xC7C7C8,  // Light gray base
+                        specular: 0x111111,
+                        shininess: 20
+                    }),
+                    // 2: Parks (green)
+                    new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(colors.park),
+                        specular: 0x111111,
+                        shininess: 20
+                    }),
+                    // 3: Roads (black)
+                    new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(colors.road),
+                        specular: 0x111111,
+                        shininess: 10
+                    }),
+                    // 4: Footpaths (black)
+                    new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(colors.footpath),
+                        specular: 0x111111,
+                        shininess: 15
+                    }),
+                    // 5: Buildings (highest layer - gray)
+                    new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(colors.building),
+                        specular: 0x111111,
+                        shininess: 20
+                    })
+                ];
+
+                // Create mesh with multiple materials
+                const mesh = new THREE.Mesh(geometry, materials);
+
+                // Rotate to correct orientation (STL is Z-up, Three.js uses Y-up)
+                mesh.rotation.x = -Math.PI / 2;
+
+                // Add to scene
+                scene.add(mesh);
+                currentMeshes.push(mesh);
+
+                // Position mesh so bottom sits on grid (Y=0)
+                const box = new THREE.Box3().setFromObject(mesh);
+                const minY = box.min.y;
+                mesh.position.y = -minY;
+
+                // Recalculate bounds and fit camera
+                box.setFromObject(mesh);
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+                cameraZ *= 1.5;
+
+                camera.position.set(cameraZ, cameraZ * 0.8, cameraZ);
+                controls.target.set(0, size.y / 2, 0);
+                controls.update();
+
+                console.log('✓ Applied materials:', {
+                    base_heart: feature_ranges.base_and_heart_faces,
+                    buildings: feature_ranges.building_faces,
+                    water: feature_ranges.water_faces,
+                    parks: feature_ranges.park_faces,
+                    roads: feature_ranges.road_faces,
+                    footpaths: feature_ranges.footpath_faces
+                });
+
+            } catch (error) {
+                console.error('3D preview error:', error);
+                container.innerHTML = `
+                    <div class="placeholder">
+                        <div class="placeholder-icon">❌</div>
+                        <div>Failed to load 3D preview</div>
+                    </div>
+                `;
+            }
+        }
+
+        // ===== SETTINGS MANAGEMENT =====
+
+        // Collect all settings from the panel
+        function collectSettings() {
+            return {
+                building_color: document.getElementById('buildingColor').value,
+                building_scale: parseFloat(document.getElementById('buildingScale').value),
+                building_min_height_mm: parseFloat(document.getElementById('buildingMinHeight').value),
+                building_roofs: document.getElementById('buildingRoofs').checked,
+
+                road_color: document.getElementById('roadColor').value,
+                road_height_mm: parseFloat(document.getElementById('roadHeight').value),
+                road_width_multiplier: parseFloat(document.getElementById('roadWidthMult').value),
+
+                water_color: document.getElementById('waterColor').value,
+                water_height_mm: parseFloat(document.getElementById('waterHeight').value),
+                water_min_area_m2: parseFloat(document.getElementById('waterMinArea').value),
+
+                park_color: document.getElementById('parkColor').value,
+                park_height_mm: parseFloat(document.getElementById('parkHeight').value),
+
+                footpath_enabled: document.getElementById('footpathEnabled').checked,
+                footpath_color: document.getElementById('footpathColor').value,
+                footpath_height_mm: parseFloat(document.getElementById('footpathHeight').value),
+                footpath_width_m: parseFloat(document.getElementById('footpathWidth').value)
+            };
+        }
+
+        // Update range slider value displays
+        document.getElementById('buildingScale').addEventListener('input', (e) => {
+            e.target.nextElementSibling.textContent = e.target.value + 'x';
+        });
+
+        document.getElementById('roadWidthMult').addEventListener('input', (e) => {
+            e.target.nextElementSibling.textContent = e.target.value + 'x';
+        });
+
+        // Reset settings to defaults
+        document.getElementById('resetSettings').addEventListener('click', () => {
+            document.getElementById('buildingColor').value = '#B8B8B8';
+            document.getElementById('buildingScale').value = 1.0;
+            document.getElementById('buildingMinHeight').value = 1.0;
+            document.getElementById('buildingRoofs').checked = false;
+
+            document.getElementById('roadColor').value = '#262626';
+            document.getElementById('roadHeight').value = 0.60;
+            document.getElementById('roadWidthMult').value = 1.8;
+
+            document.getElementById('waterColor').value = '#1479C6';
+            document.getElementById('waterHeight').value = 0.40;
+            document.getElementById('waterMinArea').value = 10;
+
+            document.getElementById('parkColor').value = '#0FE300';
+            document.getElementById('parkHeight').value = 0.40;
+
+            document.getElementById('footpathEnabled').checked = true;
+            document.getElementById('footpathColor').value = '#000000';
+            document.getElementById('footpathHeight').value = 0.30;
+            document.getElementById('footpathWidth').value = 1.5;
+
+            // Update displays
+            document.getElementById('buildingScale').nextElementSibling.textContent = '1.0x';
+            document.getElementById('roadWidthMult').nextElementSibling.textContent = '1.8x';
+        });
+
+        // ===== FORM SUBMISSION =====
+        const form = document.getElementById('mapForm');
+        const status = document.getElementById('status');
+        const generateBtn = document.getElementById('generateBtn');
+
+        function showStatus(message, type, filenames = null) {
+            status.className = 'status ' + type;
+
+            let content = message;
+            if (type === 'loading') {
+                content = '<div class="spinner"></div>' + message;
+            }
+            if (filenames) {
+                // Show download links for 3MF, PLY (both colored), and STL (no color)
+                if (filenames['3mf']) {
+                    content += `<br><a href="/download/${filenames['3mf']}" class="download-link">📥 Download 3MF</a>`;
+                }
+                if (filenames.ply) {
+                    content += ` <span style="color: #888;">|</span> <a href="/download/${filenames.ply}" class="download-link">📥 Download PLY (Full Color)</a>`;
+                }
+                if (filenames.stl) {
+                    content += ` <span style="color: #888;">|</span> <a href="/download/${filenames.stl}" class="download-link">📥 Download STL</a>`;
+                }
+                // Add split export button if we have the split zip
+                if (filenames.split_zip) {
+                    content += `<br><br><a href="/download/${filenames.split_zip}" class="download-link" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 10px 20px; border-radius: 5px; text-decoration: none; color: white; display: inline-block; margin-top: 10px;">📦 Download Split Files (Multi-Color Printing)</a>`;
+                }
+            }
+
+            status.innerHTML = content;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const lat = parseFloat(document.getElementById('lat').value);
+            const lon = parseFloat(document.getElementById('lon').value);
+            const radius = parseInt(document.getElementById('radius').value);
+
+            // Validate inputs
+            if (isNaN(lat) || isNaN(lon)) {
+                showStatus('Please enter valid coordinates!', 'error');
+                return;
+            }
+
+            // Collect settings
+            const config = collectSettings();
+
+            // Disable button and show loading
+            generateBtn.disabled = true;
+            showStatus('🎨 Generating your 3D map with custom settings... This may take 30-60 seconds.', 'loading');
+
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ lat, lon, radius, config })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showStatus('✅ ' + data.message, 'success', {
+                        stl: data.filename,
+                        '3mf': data['3mf_filename'],
+                        ply: data['ply_filename'],
+                        split_zip: data['split_zip']
+                    });
+
+                    // Load 3D preview with STL file, feature ranges, and colors
+                    load3DPreview({
+                        filename: data.filename,  // Use STL for preview
+                        feature_ranges: data.feature_ranges,
+                        colors: data.colors  // Dynamic colors from config
+                    });
+                } else {
+                    showStatus('❌ Error: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showStatus('❌ Network error: ' + error.message, 'error');
+            } finally {
+                generateBtn.disabled = false;
+            }
+        });
+
+        // Function to download as STL (regenerate with STL format)
+        async function downloadAsSTL(event, stlFilename) {
+            event.preventDefault();
+
+            const lat = parseFloat(document.getElementById('lat').value);
+            const lon = parseFloat(document.getElementById('lon').value);
+            const radius = parseInt(document.getElementById('radius').value);
+            const config = collectSettings();
+
+            showStatus('🔄 Generating STL version...', 'loading');
+
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ lat, lon, radius, config, format: 'stl' })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Immediately download the STL file
+                    window.location.href = `/download/${data.filename}`;
+                    showStatus('✅ STL generated and downloading!', 'success');
+                } else {
+                    showStatus('❌ Error generating STL: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showStatus('❌ Network error: ' + error.message, 'error');
+            }
+        }
+
+        // Initialize map on page load
+        window.addEventListener('load', function() {
+            initMap();
+            updateInputs();
+        });
+    </script>
+</body>
+</html>
