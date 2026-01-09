@@ -1784,10 +1784,10 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
 
     # Calculate boundaries with proper gaps:
     # - Border ring occupies 70-75mm (5mm wide)
-    # - Water stops at 70mm (inner edge of border)
-    # - Other features stop at 68mm (2mm gap before border for absolutely clean edges)
+    # - Water, Roads, Footpaths stop at 70mm (inner edge of border - cut off cleanly)
+    # - Parks, Buildings stop at 68mm (2mm gap before border for clean separation)
     border_width_mm = 5.0  # mm
-    feature_gap_mm = 2.0  # mm - gap between features and border ring (increased for clean edges)
+    feature_gap_mm = 2.0  # mm - gap for parks/buildings (roads extend to border)
 
     # Water boundary: clips to inner edge of border ring (70mm)
     water_radius_reduction_meters = border_width_mm / scale_factor
@@ -1801,10 +1801,10 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
 
     print(f"Created circular boundaries:")
     print(f"  Outer (base): {radius_meters}m -> {radius_meters * scale_factor:.2f}mm radius")
-    print(f"  Water: {water_radius_meters}m -> {water_radius_meters * scale_factor:.2f}mm radius")
-    print(f"  Features: {feature_radius_meters}m -> {feature_radius_meters * scale_factor:.2f}mm radius")
+    print(f"  Water/Roads/Footpaths: {water_radius_meters}m -> {water_radius_meters * scale_factor:.2f}mm radius (70mm)")
+    print(f"  Parks/Buildings: {feature_radius_meters}m -> {feature_radius_meters * scale_factor:.2f}mm radius (68mm)")
     print(f"  Border ring: 70-75mm (inner edge at 70mm)")
-    print(f"  Feature gap: {feature_gap_mm}mm")
+    print(f"  Roads extend to border, Parks have {feature_gap_mm}mm gap")
 
     # Query all feature types (with config-based type filtering)
     buildings = query_osm_buildings(lat, lon, radius_meters)
@@ -1817,14 +1817,14 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         raise ValueError("No buildings found in this area!")
 
     # Create all mesh types FIRST (need water polygons before creating base)
-    # IMPORTANT: Different boundaries for clean edges:
-    # - Water: 70mm (inner edge of border ring)
-    # - Other features: 68mm (2mm gap before border ring)
+    # IMPORTANT: Different boundaries for different feature types:
+    # - Water, Roads, Footpaths: 70mm (extend to border ring inner edge, cut off cleanly)
+    # - Parks, Buildings: 68mm (2mm gap for cleaner separation)
     building_meshes = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
     water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_water, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
-    road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary, config)
-    footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary, config) if config.footpath_enabled else []
+    road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary_water, config)
+    footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary_water, config) if config.footpath_enabled else []
 
     # Apply boolean operations to handle overlapping features (prevents z-fighting)
     # Footpaths "cut through" roads and parks where they intersect
