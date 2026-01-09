@@ -8,6 +8,8 @@
 
   stl/                      - Individual component STL files
   map_multicolor.3mf        - Single-file import (separate objects)
+  map_TIMESTAMP_bambu.obj   - OBJ file with materials (NEW!)
+  map_TIMESTAMP_bambu.mtl   - Material definitions for OBJ
   color_mapping.json        - Color reference guide
   README_BAMBU.txt          - This file
 
@@ -53,7 +55,28 @@
   6. Slice and print!
 
 
-🔧 OPTION B: Import Individual STL Files
+🔧 OPTION B: Import OBJ with Materials (NEW!)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Open Bambu Studio
+
+  2. Import the OBJ file: File → Import → Import 3D Model
+
+  3. Select "map_TIMESTAMP_bambu.obj"
+
+  4. Materials auto-assign from MTL file!
+
+  5. Map materials to your AMS slots:
+     - Select object → right-click → Select Filament
+     - Match colors to your loaded filaments
+
+  6. Slice and print!
+
+  Note: Materials are pre-defined with correct colors. You just need
+        to map them to your physical AMS slots.
+
+
+🔧 OPTION C: Import Individual STL Files
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   1. Open Bambu Studio
