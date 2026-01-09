@@ -1493,34 +1493,56 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
 
     # Subtract water polygons from base (creates holes)
     if water_polygons and len(water_polygons) > 0:
+        print(f"DEBUG: create_base_plate received {len(water_polygons)} water polygons")
         try:
             # Union all water polygons
             water_union = unary_union(water_polygons)
+            print(f"DEBUG: Water union area: {water_union.area:.2f} mm²")
 
             # Subtract water from base to create holes
+            base_before_area = base_polygon.area
             base_polygon = base_polygon.difference(water_union)
+            base_after_area = base_polygon.area if hasattr(base_polygon, 'area') else 0
+
+            print(f"DEBUG: Base area before cutout: {base_before_area:.2f} mm²")
+            print(f"DEBUG: Base area after cutout: {base_after_area:.2f} mm²")
+            print(f"DEBUG: Base polygon type after difference: {base_polygon.geom_type}")
 
             # Handle MultiPolygon (if water splits base into pieces)
+            # IMPORTANT: Keep ALL pieces, not just the largest!
             if base_polygon.geom_type == 'MultiPolygon':
-                # Keep the largest piece (the main base)
-                base_polygon = max(base_polygon.geoms, key=lambda p: p.area)
+                print(f"DEBUG: Base split into {len(base_polygon.geoms)} pieces - KEEPING ALL")
         except Exception as e:
-            print(f"Warning: Failed to cut water from base: {e}")
+            print(f"WARNING: Failed to cut water from base: {e}")
+            import traceback
+            traceback.print_exc()
             # Fall back to solid base if boolean operation fails
             pass
+    else:
+        print(f"DEBUG: No water polygons provided to create_base_plate")
 
     # Now triangulate the polygon (with holes) into a mesh
     # Bottom face (at z = -thickness_mm)
     try:
         from trimesh.creation import extrude_polygon
 
-        # Extrude the 2D polygon (with holes) into 3D
-        # This handles complex polygons with holes automatically
-        mesh = extrude_polygon(base_polygon, height=thickness_mm)
-
-        # Trimesh extrudes upward from z=0, so translate DOWN to get z=-thickness to z=0
-        # (map2model: base from z=-1.0 to z=0.0, water at z=-0.80 to -0.40 inside base volume)
-        mesh.apply_translation([0, 0, -thickness_mm])
+        # Handle both Polygon and MultiPolygon
+        if base_polygon.geom_type == 'MultiPolygon':
+            # Extrude each piece separately and combine
+            meshes = []
+            for poly in base_polygon.geoms:
+                piece_mesh = extrude_polygon(poly, height=thickness_mm)
+                piece_mesh.apply_translation([0, 0, -thickness_mm])
+                meshes.append(piece_mesh)
+            # Combine all pieces into single mesh
+            mesh = trimesh.util.concatenate(meshes)
+            print(f"DEBUG: Combined {len(meshes)} base pieces into single mesh")
+        else:
+            # Single polygon - extrude normally
+            mesh = extrude_polygon(base_polygon, height=thickness_mm)
+            # Trimesh extrudes upward from z=0, so translate DOWN to get z=-thickness to z=0
+            # (map2model: base from z=-1.0 to z=0.0, water at z=-0.80 to -0.40 inside base volume)
+            mesh.apply_translation([0, 0, -thickness_mm])
 
     except Exception as e:
         print(f"Warning: Failed to extrude base with holes: {e}")
