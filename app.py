@@ -1933,6 +1933,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         components = [
             ('water', water_meshes),
             ('base', [base]),
+            ('border_ring', [border_ring]),  # NEW: 8th component (FFFFFF_02)
             ('parks', park_meshes),
             ('roads', road_meshes),
             ('footpaths', footpath_meshes),
