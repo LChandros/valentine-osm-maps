@@ -1,0 +1,125 @@
+{
+  "project": "Valentine's Day Map Generator",
+  "version": "1.1",
+  "color_scheme": {
+    "description": "Multi-color 3D printing color mapping for Bambu Studio / AMS",
+    "total_components": 7,
+    "unique_colors": 5,
+    "ams_slots_needed": 5
+  },
+  "components": [
+    {
+      "name": "water",
+      "description": "Water features (rivers, lakes, ponds)",
+      "color_name": "Light Blue",
+      "hex": "#3399FF",
+      "rgb": [51, 153, 255],
+      "ams_slot": 1,
+      "filament_type": "PLA",
+      "notes": "Recessed 0.4mm below base for depth effect"
+    },
+    {
+      "name": "base",
+      "description": "Base plate with floor and walls",
+      "color_name": "White",
+      "hex": "#FFFFFF",
+      "rgb": [255, 255, 255],
+      "ams_slot": 2,
+      "filament_type": "PLA",
+      "notes": "Solid floor (1mm) + walls with water cutouts (0.8mm)"
+    },
+    {
+      "name": "border_ring",
+      "description": "Border ring (5mm wide)",
+      "color_name": "White",
+      "hex": "#FFFFFF",
+      "rgb": [255, 255, 255],
+      "ams_slot": 2,
+      "filament_type": "PLA",
+      "notes": "Shares filament with base - same white color"
+    },
+    {
+      "name": "parks",
+      "description": "Parks and green spaces",
+      "color_name": "Bright Green",
+      "hex": "#0FE300",
+      "rgb": [15, 227, 0],
+      "ams_slot": 3,
+      "filament_type": "PLA",
+      "notes": "Preserves interior holes (greenspaces within parks)"
+    },
+    {
+      "name": "roads",
+      "description": "Roads and streets",
+      "color_name": "Dark Gray",
+      "hex": "#262626",
+      "rgb": [38, 38, 38],
+      "ams_slot": 4,
+      "filament_type": "PLA",
+      "notes": "Curved edges follow circular boundary"
+    },
+    {
+      "name": "footpaths",
+      "description": "Footpaths and pedestrian ways",
+      "color_name": "Dark Gray",
+      "hex": "#262626",
+      "rgb": [38, 38, 38],
+      "ams_slot": 4,
+      "filament_type": "PLA",
+      "notes": "Shares filament with roads - clipped by building footprints"
+    },
+    {
+      "name": "buildings",
+      "description": "Buildings with vertical exaggeration",
+      "color_name": "Light Gray",
+      "hex": "#B8B8B8",
+      "rgb": [184, 184, 184],
+      "ams_slot": 5,
+      "filament_type": "PLA",
+      "notes": "Height exaggerated 3x for dramatic effect"
+    }
+  ],
+  "ams_slot_summary": [
+    {
+      "slot": 1,
+      "color": "Light Blue (#3399FF)",
+      "components": ["water"]
+    },
+    {
+      "slot": 2,
+      "color": "White (#FFFFFF)",
+      "components": ["base", "border_ring"]
+    },
+    {
+      "slot": 3,
+      "color": "Bright Green (#0FE300)",
+      "components": ["parks"]
+    },
+    {
+      "slot": 4,
+      "color": "Dark Gray (#262626)",
+      "components": ["roads", "footpaths"]
+    },
+    {
+      "slot": 5,
+      "color": "Light Gray (#B8B8B8)",
+      "components": ["buildings"]
+    }
+  ],
+  "print_settings": {
+    "recommended_layer_height": "0.2mm",
+    "recommended_infill": "15%",
+    "supports_needed": false,
+    "brim_recommended": true,
+    "material": "PLA",
+    "notes": "Designed to print support-free with proper orientation"
+  },
+  "geometry": {
+    "diameter": "150mm",
+    "base_thickness_floor": "1.0mm",
+    "base_thickness_walls": "0.8mm",
+    "water_depth": "0.4mm (recessed)",
+    "border_ring_width": "5mm",
+    "vertical_exaggeration": "3x for buildings"
+  }
+}

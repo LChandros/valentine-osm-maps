@@ -2143,8 +2143,8 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
                 component_filepath = os.path.join(OUTPUT_DIR, component_filename)
                 component_combined.export(component_filepath, file_type='stl')
 
-                # Add to zip
-                zipf.write(component_filepath, arcname=component_filename)
+                # Add to zip in stl/ subdirectory
+                zipf.write(component_filepath, arcname=f'stl/{component_filename}')
                 print(f"  ✓ {component_name}: {len(component_combined.faces)} faces")
 
                 # Clean up individual file (keep only zip)
@@ -2156,12 +2156,81 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
 
     print(f"✓ Split export complete: {zip_filename}")
 
+    # Create Scene-based 3MF with separate objects for Bambu Studio
+    print(f"\nCreating multi-color Scene 3MF...")
+    scene = trimesh.Scene()
+
+    # Add each component as a separate named object
+    scene_components = [
+        ('water', water_meshes, 'Water features'),
+        ('base', [base], 'Base plate with floor and walls'),
+        ('border_ring', [border_ring], 'Border ring (5mm)'),
+        ('parks', park_meshes, 'Parks and green spaces'),
+        ('roads', road_meshes, 'Roads'),
+        ('footpaths', footpath_meshes, 'Footpaths'),
+        ('buildings', building_meshes, 'Buildings')
+    ]
+
+    for component_name, meshes, description in scene_components:
+        if meshes:
+            # Combine and repair meshes
+            component_combined = trimesh.util.concatenate(meshes)
+            component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
+            component_combined.remove_duplicate_faces()
+            component_combined.remove_degenerate_faces()
+            component_combined.remove_unreferenced_vertices()
+            component_combined.fix_normals()
+            component_combined.fill_holes()
+            component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
+            component_combined.remove_duplicate_faces()
+
+            # Center it
+            component_combined.vertices -= center_offset
+
+            # Add to scene with meaningful name
+            scene.add_geometry(component_combined,
+                             node_name=component_name,
+                             geom_name=component_name,
+                             metadata={'description': description})
+            print(f"  ✓ Added {component_name} to scene")
+
+    # Export scene as 3MF
+    scene_3mf_filename = f'map_{timestamp}_multicolor.3mf'
+    scene_3mf_filepath = os.path.join(OUTPUT_DIR, scene_3mf_filename)
+    scene.export(scene_3mf_filepath, file_type='3mf')
+    print(f"✓ Multi-color scene 3MF exported: {scene_3mf_filename}")
+
+    # Add multicolor 3MF and documentation to split ZIP
+    print(f"\nAdding documentation and multicolor 3MF to split ZIP...")
+    with zipfile.ZipFile(zip_filepath, 'a', zipfile.ZIP_DEFLATED) as zipf:
+        # Add multicolor 3MF
+        zipf.write(scene_3mf_filepath, arcname='map_multicolor.3mf')
+        print(f"  ✓ Added map_multicolor.3mf")
+
+        # Add README
+        readme_path = 'README_BAMBU.txt'
+        zipf.write(readme_path, arcname='README_BAMBU.txt')
+        print(f"  ✓ Added README_BAMBU.txt")
+
+        # Add color mapping
+        color_map_path = 'color_mapping.json'
+        zipf.write(color_map_path, arcname='color_mapping.json')
+        print(f"  ✓ Added color_mapping.json")
+
+    # Clean up multicolor 3MF (keep only in zip)
+    os.remove(scene_3mf_filepath)
+    print(f"✓ Enhanced split export complete: {zip_filename}")
+
     print(f"\n{'='*60}")
     print(f"Generated files:")
     print(f"  STL (preview): {stl_filename}")
     print(f"  3MF (download): {mf3_filename}")
     print(f"  PLY (full color): {ply_filename}")
-    print(f"  Split ZIP (multi-color): {zip_filename}")
+    print(f"  Enhanced Split ZIP (Bambu Studio ready): {zip_filename}")
+    print(f"    ├─ stl/ - Individual component STL files")
+    print(f"    ├─ map_multicolor.3mf - Multi-color scene (single file import)")
+    print(f"    ├─ README_BAMBU.txt - Usage instructions")
+    print(f"    └─ color_mapping.json - Color reference guide")
     print(f"Total faces: {len(combined.faces)}")
     print(f"Has vertex colors: {hasattr(combined.visual, 'vertex_colors')}")
     print(f"Feature breakdown: {feature_ranges}")
