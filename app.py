@@ -1718,9 +1718,21 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     scale_factor = BASE_SIZE_MM / max_extent
     print(f"Scale factor: {scale_factor:.4f} (fitting {max_extent}m into {BASE_SIZE_MM}mm)")
 
-    # Create circular boundary for clipping all features
-    circle_boundary = create_circular_boundary(radius_meters, scale_factor)
-    print(f"Created circular boundary with radius {radius_meters}m")
+    # Create circular boundaries:
+    # - Outer boundary (75mm radius) for base plate
+    # - Inner boundary (70mm radius) for clipping features to avoid border ring intersection
+    circle_boundary_outer = create_circular_boundary(radius_meters, scale_factor)
+
+    # Calculate inner radius: reduce by 5mm (border ring width) in scaled space
+    border_width_mm = 5.0  # mm
+    inner_radius_reduction_meters = border_width_mm / scale_factor
+    inner_radius_meters = radius_meters - inner_radius_reduction_meters
+    circle_boundary = create_circular_boundary(inner_radius_meters, scale_factor)
+
+    print(f"Created circular boundaries:")
+    print(f"  Outer (base): {radius_meters}m -> {radius_meters * scale_factor:.2f}mm radius")
+    print(f"  Inner (features): {inner_radius_meters}m -> {inner_radius_meters * scale_factor:.2f}mm radius")
+    print(f"  Border ring width: {border_width_mm}mm")
 
     # Query all feature types (with config-based type filtering)
     buildings = query_osm_buildings(lat, lon, radius_meters)
