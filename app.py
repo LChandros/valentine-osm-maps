@@ -1782,16 +1782,29 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # - Inner boundary (70mm radius) for clipping features to avoid border ring intersection
     circle_boundary_outer = create_circular_boundary(radius_meters, scale_factor)
 
-    # Calculate inner radius: reduce by 5mm (border ring width) in scaled space
+    # Calculate boundaries with proper gaps:
+    # - Border ring occupies 70-75mm (5mm wide)
+    # - Water stops at 70mm (inner edge of border)
+    # - Other features stop at 69mm (1mm gap before border for clean edges)
     border_width_mm = 5.0  # mm
-    inner_radius_reduction_meters = border_width_mm / scale_factor
-    inner_radius_meters = radius_meters - inner_radius_reduction_meters
-    circle_boundary = create_circular_boundary(inner_radius_meters, scale_factor)
+    feature_gap_mm = 1.0  # mm - gap between features and border ring
+
+    # Water boundary: clips to inner edge of border ring (70mm)
+    water_radius_reduction_meters = border_width_mm / scale_factor
+    water_radius_meters = radius_meters - water_radius_reduction_meters
+    circle_boundary_water = create_circular_boundary(water_radius_meters, scale_factor)
+
+    # Feature boundary: clips with 1mm gap before border ring (69mm)
+    feature_radius_reduction_meters = (border_width_mm + feature_gap_mm) / scale_factor
+    feature_radius_meters = radius_meters - feature_radius_reduction_meters
+    circle_boundary = create_circular_boundary(feature_radius_meters, scale_factor)
 
     print(f"Created circular boundaries:")
     print(f"  Outer (base): {radius_meters}m -> {radius_meters * scale_factor:.2f}mm radius")
-    print(f"  Inner (features): {inner_radius_meters}m -> {inner_radius_meters * scale_factor:.2f}mm radius")
-    print(f"  Border ring width: {border_width_mm}mm")
+    print(f"  Water: {water_radius_meters}m -> {water_radius_meters * scale_factor:.2f}mm radius")
+    print(f"  Features: {feature_radius_meters}m -> {feature_radius_meters * scale_factor:.2f}mm radius")
+    print(f"  Border ring: 70-75mm (inner edge at 70mm)")
+    print(f"  Feature gap: {feature_gap_mm}mm")
 
     # Query all feature types (with config-based type filtering)
     buildings = query_osm_buildings(lat, lon, radius_meters)
@@ -1804,10 +1817,11 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         raise ValueError("No buildings found in this area!")
 
     # Create all mesh types FIRST (need water polygons before creating base)
-    # IMPORTANT: Water uses OUTER boundary (75mm) since it's below border ring (z=-0.80 to -0.40)
-    # Other features use INNER boundary (70mm) to avoid border ring collision (z=0.0+)
+    # IMPORTANT: Different boundaries for clean edges:
+    # - Water: 70mm (inner edge of border ring)
+    # - Other features: 69mm (1mm gap before border ring)
     building_meshes = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
-    water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_outer, config)
+    water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_water, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
     road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary, config)
     footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary, config) if config.footpath_enabled else []
