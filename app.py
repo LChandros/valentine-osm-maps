@@ -658,6 +658,7 @@ def query_osm_parks(lat, lon, radius_meters=300):
       way["leisure"="garden"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["leisure"="recreation_ground"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["leisure"="playground"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+      way["leisure"="pitch"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["landuse"="forest"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["landuse"="grass"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["landuse"="meadow"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
