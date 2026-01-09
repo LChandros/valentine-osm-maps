@@ -1774,8 +1774,10 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         raise ValueError("No buildings found in this area!")
 
     # Create all mesh types FIRST (need water polygons before creating base)
+    # IMPORTANT: Water uses OUTER boundary (75mm) since it's below border ring (z=-0.80 to -0.40)
+    # Other features use INNER boundary (70mm) to avoid border ring collision (z=0.0+)
     building_meshes = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
-    water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary, config)
+    water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_outer, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
     road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary, config)
     footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary, config) if config.footpath_enabled else []
