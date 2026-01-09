@@ -615,7 +615,10 @@ def query_osm_water(lat, lon, radius_meters=300, config=None):
       way["natural"="water"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["waterway"="river"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["waterway"="canal"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+      way["waterway"="stream"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       relation["natural"="water"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+      relation["waterway"="river"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+      relation["waterway"="canal"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
     );
     out body;
     >;
@@ -633,6 +636,13 @@ def query_osm_water(lat, lon, radius_meters=300, config=None):
         if element['type'] == 'node':
             nodes[element['id']] = (element['lat'], element['lon'])
 
+    # First pass: collect all ways (for both direct ways and relation members)
+    ways = {}
+    for element in data.get('elements', []):
+        if element['type'] == 'way':
+            ways[element['id']] = element
+
+    # Second pass: process both direct ways and relations
     for element in data.get('elements', []):
         if element['type'] == 'way' and 'tags' in element:
             node_ids = element['nodes']
@@ -646,6 +656,26 @@ def query_osm_water(lat, lon, radius_meters=300, config=None):
                     'footprint': footprint,
                     'water_type': water_type  # river, canal, water, etc.
                 })
+
+        # Process relations (multipolygon rivers/lakes)
+        elif element['type'] == 'relation' and 'tags' in element:
+            tags = element['tags']
+            water_type = tags.get('waterway', tags.get('natural', 'unknown'))
+
+            # Process outer members of the relation
+            for member in element.get('members', []):
+                if member.get('role') == 'outer' and member.get('type') == 'way':
+                    way_id = member.get('ref')
+                    if way_id in ways:
+                        way = ways[way_id]
+                        node_ids = way.get('nodes', [])
+                        footprint = [nodes[nid] for nid in node_ids if nid in nodes]
+
+                        if len(footprint) >= 3:
+                            water_features.append({
+                                'footprint': footprint,
+                                'water_type': water_type  # from relation tags
+                            })
 
     print(f"Found {len(water_features)} water features")
     return water_features
