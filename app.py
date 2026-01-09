@@ -1292,7 +1292,7 @@ def create_road_meshes(roads, center_lat, center_lon, scale_factor=1.0, circle_b
 
     meshes = []
     road_width = 2.0 * config.road_width_multiplier  # mm, with multiplier
-    road_base_z = 0.0 + config.road_depth_mm  # mm - sits on base, adjustable depth for underground
+    road_base_z = -0.40 + config.road_depth_mm  # mm - starts at water top level (map2model: -0.40)
     road_thickness = config.road_height_mm  # mm - configurable height
     road_top_z = road_base_z + road_thickness
 
@@ -1383,7 +1383,7 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
     footpath_width_mm = config.footpath_width_m * scale_factor  # Width in mm after scaling
     # Footpaths sit on base (same as roads and parks)
     # Boolean operations will handle overlaps to prevent z-fighting
-    footpath_base_z = 0.0  # mm - sits on base
+    footpath_base_z = -0.40  # mm - starts at water top level (map2model: -0.40)
     footpath_thickness = config.footpath_height_mm  # mm - configurable height
     footpath_top_z = footpath_base_z + footpath_thickness
 
@@ -1469,10 +1469,10 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     Create a circular base plate with water cutouts (map2model approach).
 
     Structure:
-    - Circular base from z = 0 to z = +thickness_mm (ABOVE bed level)
-    - Water sits BELOW bed at z=-0.80 to -0.40 (negative Z)
+    - Circular base from z = -thickness_mm to z = 0 (BELOW bed level)
+    - Water sits at z=-0.80 to -0.40 (negative Z, inside base volume)
     - Base has HOLES where water is located (boolean difference)
-    - Water visible through holes as first-layer color change
+    - Water visible through holes, roads/footpaths start at water top (-0.40)
 
     Args:
         size_mm: Diameter of base plate
@@ -1516,9 +1516,11 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
 
         # Extrude the 2D polygon (with holes) into 3D
         # This handles complex polygons with holes automatically
-        # Trimesh extrudes upward from z=0, which is exactly what we want
-        # (base goes from z=0 to z=+thickness_mm, exposing water at negative Z)
         mesh = extrude_polygon(base_polygon, height=thickness_mm)
+
+        # Trimesh extrudes upward from z=0, so translate DOWN to get z=-thickness to z=0
+        # (map2model: base from z=-1.0 to z=0.0, water at z=-0.80 to -0.40 inside base volume)
+        mesh.apply_translation([0, 0, -thickness_mm])
 
     except Exception as e:
         print(f"Warning: Failed to extrude base with holes: {e}")
@@ -1526,24 +1528,24 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
         vertices = []
         faces = []
 
-        # Bottom vertices (at z=0, bed level)
+        # Bottom vertices (at z=-thickness_mm, below bed)
+        for x, y in circle_coords:
+            vertices.append([x, y, -thickness_mm])
+
+        # Top vertices (at z=0, bed level)
         for x, y in circle_coords:
             vertices.append([x, y, 0])
 
-        # Top vertices (at z=+thickness_mm, above bed)
-        for x, y in circle_coords:
-            vertices.append([x, y, thickness_mm])
-
         # Bottom face (triangulated from center)
         bottom_center = len(vertices)
-        vertices.append([0, 0, 0])
+        vertices.append([0, 0, -thickness_mm])
         for i in range(resolution):
             next_i = (i + 1) % resolution
             faces.append([bottom_center, i, next_i])
 
         # Top face
         top_center = len(vertices)
-        vertices.append([0, 0, thickness_mm])
+        vertices.append([0, 0, 0])
         for i in range(resolution):
             next_i = (i + 1) % resolution
             faces.append([top_center, resolution + next_i, resolution + i])
@@ -1698,7 +1700,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
                 print(f"    → Keeping original {len(park_meshes)} park meshes")
                 # Keep original park meshes on failure
 
-    # Create base with cutouts for water (water sits below at negative Z, visible through holes)
+    # Create base plate with water cutouts (z=-1.0 to z=0.0, matching map2model)
     base = create_base_plate(BASE_SIZE_MM, 1, water_polygons=water_polygons)
 
     # Center offset (will be applied to all)
@@ -1744,8 +1746,8 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         with open('/tmp/export_debug.log', 'a') as f:
             f.write(f"NO WATER MESHES - water_meshes is empty or None\n")
 
-    # Layer 2: Base plate
-    base_colored = apply_vertex_colors([base], '#FFFFFF')  # White (map2model optimized)
+    # Layer 2: Base plate (z=-1.0 to z=0.0, with water cutouts)
+    base_colored = apply_vertex_colors([base], '#FFFFFF')  # White (map2model)
     all_meshes.extend(base_colored)
     feature_ranges['base_and_heart_faces'] = len(base.faces)
 
