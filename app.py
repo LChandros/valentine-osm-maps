@@ -1110,9 +1110,11 @@ def create_water_meshes(water_features, center_lat, center_lon, scale_factor=1.0
         f.write(f"Min area threshold: {config.water_min_area_m2} m²\n")
 
     meshes = []
-    water_base_z = 0.0  # mm - sits ON base surface (same level as roads/parks)
-    water_thickness = config.water_height_mm  # mm - configurable
-    water_top_z = water_base_z + water_thickness
+    # Map2model approach: water sits BELOW bed level (negative Z)
+    # This creates first-layer color change effect, no base cutouts needed
+    water_base_z = -0.80  # mm - BELOW print bed (map2model approach)
+    water_top_z = -0.40   # mm - still BELOW bed level
+    water_thickness = water_top_z - water_base_z  # 0.4mm thick
 
     filtered_count = 0
     for i, feature in enumerate(water_features):
@@ -1460,17 +1462,18 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
 
 def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     """
-    Create a circular base plate with water cutouts (map2model style).
+    Create a circular base plate (map2model approach: no cutouts needed).
 
     Structure:
     - Circular base from z = -thickness_mm to z = 0
-    - Water polygons cut holes through the base (so water below is visible)
-    - Water sits BELOW at -1mm, everything else sits ON TOP at z=0+
+    - Water sits BELOW bed at z=-0.80 to -0.40 (negative Z)
+    - Everything else sits ON bed at z=0+ (positive Z)
+    - No cutouts needed - water appears as first-layer color change
 
     Args:
         size_mm: Diameter of base plate
         thickness_mm: Thickness of base (default 1mm)
-        water_polygons: List of Shapely polygons representing water features (to cut out)
+        water_polygons: Legacy parameter (no longer used - kept for compatibility)
     """
     from shapely.geometry import Polygon, Point
     from shapely.ops import unary_union
