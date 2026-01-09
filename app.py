@@ -1249,34 +1249,45 @@ def create_park_meshes(parks, center_lat, center_lon, scale_factor=1.0, circle_b
                 if polygon is None:
                     continue
 
-            coords = list(polygon.exterior.coords[:-1])
-            n_points = len(coords)
+            # Use extrude_polygon to properly handle polygons with holes (interior greenspaces)
+            # This preserves interior holes that represent greenspaces within parks
+            from trimesh.creation import extrude_polygon
 
-            if n_points < 3:
-                continue
+            try:
+                mesh = extrude_polygon(polygon, height=park_thickness)
+                # Position: bottom at park_base_z, top at park_top_z
+                mesh.apply_translation([0, 0, park_base_z])
+            except Exception as e:
+                print(f"Warning: Failed to extrude park polygon (may have holes): {e}")
+                # Fallback to simple extrusion without holes
+                coords = list(polygon.exterior.coords[:-1])
+                n_points = len(coords)
 
-            vertices = []
-            # Bottom vertices (at park_base_z)
-            for x, y in coords:
-                vertices.append([x, y, park_base_z])
-            # Top vertices
-            for x, y in coords:
-                vertices.append([x, y, park_top_z])
+                if n_points < 3:
+                    continue
 
-            faces = []
-            # Bottom face
-            for i in range(1, n_points - 1):
-                faces.append([0, i + 1, i])
-            # Top face
-            for i in range(1, n_points - 1):
-                faces.append([n_points, n_points + i, n_points + i + 1])
-            # Side faces
-            for i in range(n_points):
-                next_i = (i + 1) % n_points
-                faces.append([i, next_i, n_points + i])
-                faces.append([next_i, n_points + next_i, n_points + i])
+                vertices = []
+                # Bottom vertices (at park_base_z)
+                for x, y in coords:
+                    vertices.append([x, y, park_base_z])
+                # Top vertices
+                for x, y in coords:
+                    vertices.append([x, y, park_top_z])
 
-            mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
+                faces = []
+                # Bottom face
+                for i in range(1, n_points - 1):
+                    faces.append([0, i + 1, i])
+                # Top face
+                for i in range(1, n_points - 1):
+                    faces.append([n_points, n_points + i, n_points + i + 1])
+                # Side faces
+                for i in range(n_points):
+                    next_i = (i + 1) % n_points
+                    faces.append([i, next_i, n_points + i])
+                    faces.append([next_i, n_points + next_i, n_points + i])
+
+                mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
             meshes.append(mesh)
         except Exception as e:
             continue
@@ -1600,7 +1611,7 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     return mesh
 
 
-def create_border_ring(size_mm=150, ring_width_mm=3):
+def create_border_ring(size_mm=150, ring_width_mm=5):
     """
     Create a circular border ring around the map (map2model component FFFFFF_02).
 
@@ -1611,7 +1622,7 @@ def create_border_ring(size_mm=150, ring_width_mm=3):
 
     Args:
         size_mm: Diameter of outer circle (same as base plate)
-        ring_width_mm: Width of the ring (default 3mm)
+        ring_width_mm: Width of the ring (default 5mm - increased from 3mm for visibility)
 
     Returns:
         Trimesh object of the border ring
@@ -1624,6 +1635,8 @@ def create_border_ring(size_mm=150, ring_width_mm=3):
     inner_radius = outer_radius - ring_width_mm
     resolution = 64
 
+    print(f"DEBUG: Creating border ring with outer_r={outer_radius:.2f}mm, inner_r={inner_radius:.2f}mm, width={ring_width_mm}mm")
+
     # Create outer circle
     angles = np.linspace(0, 2*np.pi, resolution, endpoint=False)
     outer_coords = [[outer_radius * np.cos(a), outer_radius * np.sin(a)] for a in angles]
@@ -1633,8 +1646,13 @@ def create_border_ring(size_mm=150, ring_width_mm=3):
     inner_coords = [[inner_radius * np.cos(a), inner_radius * np.sin(a)] for a in angles]
     inner_polygon = Polygon(inner_coords)
 
+    print(f"DEBUG: Outer polygon valid={outer_polygon.is_valid}, area={outer_polygon.area:.2f}")
+    print(f"DEBUG: Inner polygon valid={inner_polygon.is_valid}, area={inner_polygon.area:.2f}")
+
     # Subtract inner from outer to create ring (annulus)
     ring_polygon = outer_polygon.difference(inner_polygon)
+
+    print(f"DEBUG: Ring polygon type={ring_polygon.geom_type}, valid={ring_polygon.is_valid}, area={ring_polygon.area:.2f}")
 
     # Extrude ring from z=-1.0 to z=0.40 (1.4mm total height)
     ring_height = 1.4  # mm
@@ -1643,7 +1661,8 @@ def create_border_ring(size_mm=150, ring_width_mm=3):
     # Position: bottom at z=-1.0, top at z=0.40
     ring_mesh.apply_translation([0, 0, -1.0])
 
-    print(f"DEBUG: Created border ring: z=-1.0 to z=0.40 (outer_r={outer_radius}mm, inner_r={inner_radius}mm)")
+    print(f"DEBUG: Border ring mesh created: {len(ring_mesh.vertices)} vertices, {len(ring_mesh.faces)} faces")
+    print(f"DEBUG: Border ring Z-range: {ring_mesh.vertices[:, 2].min():.3f} to {ring_mesh.vertices[:, 2].max():.3f}")
 
     return ring_mesh
 
@@ -1791,7 +1810,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     base = create_base_plate(BASE_SIZE_MM, 1, water_polygons=water_polygons)
 
     # Create border ring (z=-1.0 to z=0.40, matching map2model component FFFFFF_02)
-    border_ring = create_border_ring(BASE_SIZE_MM, ring_width_mm=3)
+    border_ring = create_border_ring(BASE_SIZE_MM, ring_width_mm=5)
 
     # Center offset (will be applied to all)
     center_offset = None
