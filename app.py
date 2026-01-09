@@ -1973,23 +1973,23 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         'building_faces': 0
     }
 
-    # Helper function to repair individual component meshes
-    def repair_component_mesh(meshes, name):
-        """Repair a single component (merge vertices WITHIN component only)"""
+    # Helper function to combine component meshes WITHOUT vertex merging
+    def combine_component_mesh(meshes, name):
+        """Combine component meshes WITHOUT merge_vertices (prevents non-manifolds)"""
         if not meshes:
             return None
 
         # Concatenate all meshes in this component
         component = trimesh.util.concatenate(meshes)
 
-        # Repair WITHIN this component only
-        component.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
+        # MINIMAL cleanup - NO merge_vertices!
+        # merge_vertices creates non-manifold edges, even within a single component
+        # when the component has complex boolean operation results
         component.remove_duplicate_faces()
         component.remove_degenerate_faces()
         component.remove_unreferenced_vertices()
-        component.fix_normals()
 
-        print(f"✓ {name}: {len(component.faces)} faces, watertight: {component.is_watertight}")
+        print(f"✓ {name}: {len(component.faces)} faces")
         return component
 
     # Start with empty list of REPAIRED components
@@ -1998,15 +1998,15 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # DEBUG LOGGING
     with open('/tmp/export_debug.log', 'a') as f:
         f.write(f"\n{'='*60}\n")
-        f.write(f"Layer assembly starting (NEW STRATEGY: per-component repair)\n")
+        f.write(f"Layer assembly starting (NEW STRATEGY: NO vertex merging)\n")
         f.write(f"water_meshes: {len(water_meshes)} meshes, {sum(len(m.faces) for m in water_meshes) if water_meshes else 0} total faces\n")
 
-    print(f"\n=== Pre-repairing Components (prevents cross-component non-manifolds) ===")
+    print(f"\n=== Combining Components (NO vertex merging - preserves mesh integrity) ===")
 
     # Layer 1: Water (lowest - at z=0)
     if water_meshes:
         water_colored = apply_vertex_colors(water_meshes, config.water_color)
-        water_repaired = repair_component_mesh(water_colored, "Water")
+        water_repaired = combine_component_mesh(water_colored, "Water")
         if water_repaired:
             all_meshes.append(water_repaired)
             feature_ranges['water_faces'] = len(water_repaired.faces)
@@ -2017,7 +2017,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
 
     # Layer 2 & 2.5: Base plate and border ring (both white, same color component)
     base_and_border_colored = apply_vertex_colors([base, border_ring], '#FFFFFF')
-    base_repaired = repair_component_mesh(base_and_border_colored, "Base + Border")
+    base_repaired = combine_component_mesh(base_and_border_colored, "Base + Border")
     if base_repaired:
         all_meshes.append(base_repaired)
         feature_ranges['base_and_heart_faces'] = len(base_repaired.faces)
@@ -2025,7 +2025,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # Layer 3: Parks (green spaces)
     if park_meshes:
         parks_colored = apply_vertex_colors(park_meshes, config.park_color)
-        parks_repaired = repair_component_mesh(parks_colored, "Parks")
+        parks_repaired = combine_component_mesh(parks_colored, "Parks")
         if parks_repaired:
             all_meshes.append(parks_repaired)
             feature_ranges['park_faces'] = len(parks_repaired.faces)
@@ -2033,7 +2033,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # Layer 4: Roads
     if road_meshes:
         roads_colored = apply_vertex_colors(road_meshes, config.road_color)
-        roads_repaired = repair_component_mesh(roads_colored, "Roads")
+        roads_repaired = combine_component_mesh(roads_colored, "Roads")
         if roads_repaired:
             all_meshes.append(roads_repaired)
             feature_ranges['road_faces'] = len(roads_repaired.faces)
@@ -2041,14 +2041,14 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # Layer 5: Footpaths
     if footpath_meshes:
         footpaths_colored = apply_vertex_colors(footpath_meshes, config.footpath_color)
-        footpaths_repaired = repair_component_mesh(footpaths_colored, "Footpaths")
+        footpaths_repaired = combine_component_mesh(footpaths_colored, "Footpaths")
         if footpaths_repaired:
             all_meshes.append(footpaths_repaired)
             feature_ranges['footpath_faces'] = len(footpaths_repaired.faces)
 
     # Layer 6: Buildings (highest)
     buildings_colored = apply_vertex_colors(building_meshes, config.building_color)
-    buildings_repaired = repair_component_mesh(buildings_colored, "Buildings")
+    buildings_repaired = combine_component_mesh(buildings_colored, "Buildings")
     if buildings_repaired:
         all_meshes.append(buildings_repaired)
         feature_ranges['building_faces'] = len(buildings_repaired.faces)
