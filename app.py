@@ -1600,6 +1600,54 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     return mesh
 
 
+def create_border_ring(size_mm=150, ring_width_mm=3):
+    """
+    Create a circular border ring around the map (map2model component FFFFFF_02).
+
+    Structure:
+    - Annulus (donut) shape: outer circle with inner hole
+    - Extends from z=-1.0 to z=0.40 (1.4mm thick)
+    - Serves as raised border for the map
+
+    Args:
+        size_mm: Diameter of outer circle (same as base plate)
+        ring_width_mm: Width of the ring (default 3mm)
+
+    Returns:
+        Trimesh object of the border ring
+    """
+    from shapely.geometry import Polygon, Point
+    from trimesh.creation import extrude_polygon
+    import trimesh
+
+    outer_radius = size_mm / 2
+    inner_radius = outer_radius - ring_width_mm
+    resolution = 64
+
+    # Create outer circle
+    angles = np.linspace(0, 2*np.pi, resolution, endpoint=False)
+    outer_coords = [[outer_radius * np.cos(a), outer_radius * np.sin(a)] for a in angles]
+    outer_polygon = Polygon(outer_coords)
+
+    # Create inner circle (hole)
+    inner_coords = [[inner_radius * np.cos(a), inner_radius * np.sin(a)] for a in angles]
+    inner_polygon = Polygon(inner_coords)
+
+    # Subtract inner from outer to create ring (annulus)
+    ring_polygon = outer_polygon.difference(inner_polygon)
+
+    # Extrude ring from z=-1.0 to z=0.40 (1.4mm total height)
+    ring_height = 1.4  # mm
+    ring_mesh = extrude_polygon(ring_polygon, height=ring_height)
+
+    # Position: bottom at z=-1.0, top at z=0.40
+    ring_mesh.apply_translation([0, 0, -1.0])
+
+    print(f"DEBUG: Created border ring: z=-1.0 to z=0.40 (outer_r={outer_radius}mm, inner_r={inner_radius}mm)")
+
+    return ring_mesh
+
+
 def hex_to_rgb(hex_color):
     """Convert hex color string to RGB tuple (0-255 range)"""
     hex_color = hex_color.lstrip('#')
@@ -1742,6 +1790,9 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # Create base plate with water cutouts (z=-1.0 to z=0.0, matching map2model)
     base = create_base_plate(BASE_SIZE_MM, 1, water_polygons=water_polygons)
 
+    # Create border ring (z=-1.0 to z=0.40, matching map2model component FFFFFF_02)
+    border_ring = create_border_ring(BASE_SIZE_MM, ring_width_mm=3)
+
     # Center offset (will be applied to all)
     center_offset = None
 
@@ -1789,6 +1840,11 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     base_colored = apply_vertex_colors([base], '#FFFFFF')  # White (map2model)
     all_meshes.extend(base_colored)
     feature_ranges['base_and_heart_faces'] = len(base.faces)
+
+    # Layer 2.5: Border ring (z=-1.0 to z=0.40, raised border around map)
+    border_colored = apply_vertex_colors([border_ring], '#FFFFFF')  # White (map2model)
+    all_meshes.extend(border_colored)
+    print(f"✓ Border ring: {len(border_ring.faces)} faces")
 
     # Layer 3: Parks (green spaces)
     if park_meshes:
