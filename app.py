@@ -1973,98 +1973,110 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         'building_faces': 0
     }
 
-    # Start with empty list
+    # Helper function to repair individual component meshes
+    def repair_component_mesh(meshes, name):
+        """Repair a single component (merge vertices WITHIN component only)"""
+        if not meshes:
+            return None
+
+        # Concatenate all meshes in this component
+        component = trimesh.util.concatenate(meshes)
+
+        # Repair WITHIN this component only
+        component.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
+        component.remove_duplicate_faces()
+        component.remove_degenerate_faces()
+        component.remove_unreferenced_vertices()
+        component.fix_normals()
+
+        print(f"✓ {name}: {len(component.faces)} faces, watertight: {component.is_watertight}")
+        return component
+
+    # Start with empty list of REPAIRED components
     all_meshes = []
 
     # DEBUG LOGGING
     with open('/tmp/export_debug.log', 'a') as f:
         f.write(f"\n{'='*60}\n")
-        f.write(f"Layer assembly starting\n")
+        f.write(f"Layer assembly starting (NEW STRATEGY: per-component repair)\n")
         f.write(f"water_meshes: {len(water_meshes)} meshes, {sum(len(m.faces) for m in water_meshes) if water_meshes else 0} total faces\n")
+
+    print(f"\n=== Pre-repairing Components (prevents cross-component non-manifolds) ===")
 
     # Layer 1: Water (lowest - at z=0)
     if water_meshes:
         water_colored = apply_vertex_colors(water_meshes, config.water_color)
-        all_meshes.extend(water_colored)
-        feature_ranges['water_faces'] = sum(len(m.faces) for m in water_meshes)
-        print(f"✓ Water: {len(water_meshes)} features")
-
-        # DEBUG LOGGING
-        with open('/tmp/export_debug.log', 'a') as f:
-            f.write(f"Added {len(water_colored)} colored water meshes to all_meshes\n")
+        water_repaired = repair_component_mesh(water_colored, "Water")
+        if water_repaired:
+            all_meshes.append(water_repaired)
+            feature_ranges['water_faces'] = len(water_repaired.faces)
     else:
         # DEBUG LOGGING
         with open('/tmp/export_debug.log', 'a') as f:
             f.write(f"NO WATER MESHES - water_meshes is empty or None\n")
 
     # Layer 2 & 2.5: Base plate and border ring (both white, same color component)
-    # IMPORTANT: Color them together so they get the same color ID in 3MF export
-    base_and_border_colored = apply_vertex_colors([base, border_ring], '#FFFFFF')  # White (map2model)
-    all_meshes.extend(base_and_border_colored)
-    feature_ranges['base_and_heart_faces'] = len(base.faces) + len(border_ring.faces)
-    print(f"✓ Base + Border ring: {len(base.faces)} + {len(border_ring.faces)} faces (same color)")
+    base_and_border_colored = apply_vertex_colors([base, border_ring], '#FFFFFF')
+    base_repaired = repair_component_mesh(base_and_border_colored, "Base + Border")
+    if base_repaired:
+        all_meshes.append(base_repaired)
+        feature_ranges['base_and_heart_faces'] = len(base_repaired.faces)
 
     # Layer 3: Parks (green spaces)
     if park_meshes:
         parks_colored = apply_vertex_colors(park_meshes, config.park_color)
-        all_meshes.extend(parks_colored)
-        feature_ranges['park_faces'] = sum(len(m.faces) for m in park_meshes)
-        print(f"✓ Parks: {len(park_meshes)} features")
+        parks_repaired = repair_component_mesh(parks_colored, "Parks")
+        if parks_repaired:
+            all_meshes.append(parks_repaired)
+            feature_ranges['park_faces'] = len(parks_repaired.faces)
 
     # Layer 4: Roads
     if road_meshes:
         roads_colored = apply_vertex_colors(road_meshes, config.road_color)
-        all_meshes.extend(roads_colored)
-        feature_ranges['road_faces'] = sum(len(m.faces) for m in road_meshes)
-        print(f"✓ Roads: {len(road_meshes)} features")
+        roads_repaired = repair_component_mesh(roads_colored, "Roads")
+        if roads_repaired:
+            all_meshes.append(roads_repaired)
+            feature_ranges['road_faces'] = len(roads_repaired.faces)
 
     # Layer 5: Footpaths
     if footpath_meshes:
         footpaths_colored = apply_vertex_colors(footpath_meshes, config.footpath_color)
-        all_meshes.extend(footpaths_colored)
-        feature_ranges['footpath_faces'] = sum(len(m.faces) for m in footpath_meshes)
-        print(f"✓ Footpaths: {len(footpath_meshes)} features")
+        footpaths_repaired = repair_component_mesh(footpaths_colored, "Footpaths")
+        if footpaths_repaired:
+            all_meshes.append(footpaths_repaired)
+            feature_ranges['footpath_faces'] = len(footpaths_repaired.faces)
 
     # Layer 6: Buildings (highest)
     buildings_colored = apply_vertex_colors(building_meshes, config.building_color)
-    all_meshes.extend(buildings_colored)
-    feature_ranges['building_faces'] = sum(len(m.faces) for m in building_meshes)
+    buildings_repaired = repair_component_mesh(buildings_colored, "Buildings")
+    if buildings_repaired:
+        all_meshes.append(buildings_repaired)
+        feature_ranges['building_faces'] = len(buildings_repaired.faces)
 
-    # Combine all meshes in correct order
+    # Combine all PRE-REPAIRED meshes (NO global merge_vertices!)
     if not all_meshes:
         raise ValueError("No meshes to combine!")
     combined = trimesh.util.concatenate(all_meshes)
 
-    # Repair non-manifold geometry
-    print(f"\n=== Mesh Repair ===")
-    print(f"Before repair:")
+    # Minimal cleanup ONLY (no cross-component vertex merging!)
+    print(f"\n=== Final Assembly (no cross-component merging) ===")
+    print(f"Before assembly:")
+    print(f"  Components: {len(all_meshes)}")
     print(f"  Vertices: {len(combined.vertices)}")
     print(f"  Faces: {len(combined.faces)}")
-    print(f"  Is watertight: {combined.is_watertight}")
 
-    # More aggressive vertex merging to fix overlapping edges
-    # Use a small threshold to merge vertices that are very close
-    combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
+    # IMPORTANT: Do NOT call merge_vertices() here!
+    # That would merge vertices across components, creating non-manifolds.
+    # Each component was already repaired individually.
 
-    # Remove duplicate vertices and faces
+    # Only do minimal cleanup that doesn't merge across components
     combined.remove_duplicate_faces()
-    combined.remove_degenerate_faces()
     combined.remove_unreferenced_vertices()
 
-    # Fix normals
-    combined.fix_normals()
-
-    # Fill small holes
-    combined.fill_holes()
-
-    # Final cleanup pass
-    combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
-    combined.remove_duplicate_faces()
-
-    print(f"After repair:")
+    print(f"After assembly:")
     print(f"  Vertices: {len(combined.vertices)}")
     print(f"  Faces: {len(combined.faces)}")
-    print(f"  Is watertight: {combined.is_watertight}")
+    print(f"  Components remain separate (no cross-component merging)")
 
     # Center the combined model in X and Y only (preserve Z for base frame structure)
     center_offset = combined.bounds.mean(axis=0)
