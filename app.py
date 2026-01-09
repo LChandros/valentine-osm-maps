@@ -2035,6 +2035,37 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
         raise ValueError("No meshes to combine!")
     combined = trimesh.util.concatenate(all_meshes)
 
+    # Repair non-manifold geometry
+    print(f"\n=== Mesh Repair ===")
+    print(f"Before repair:")
+    print(f"  Vertices: {len(combined.vertices)}")
+    print(f"  Faces: {len(combined.faces)}")
+    print(f"  Is watertight: {combined.is_watertight}")
+
+    # More aggressive vertex merging to fix overlapping edges
+    # Use a small threshold to merge vertices that are very close
+    combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
+
+    # Remove duplicate vertices and faces
+    combined.remove_duplicate_faces()
+    combined.remove_degenerate_faces()
+    combined.remove_unreferenced_vertices()
+
+    # Fix normals
+    combined.fix_normals()
+
+    # Fill small holes
+    combined.fill_holes()
+
+    # Final cleanup pass
+    combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
+    combined.remove_duplicate_faces()
+
+    print(f"After repair:")
+    print(f"  Vertices: {len(combined.vertices)}")
+    print(f"  Faces: {len(combined.faces)}")
+    print(f"  Is watertight: {combined.is_watertight}")
+
     # Center the combined model in X and Y only (preserve Z for base frame structure)
     center_offset = combined.bounds.mean(axis=0)
     center_offset[2] = 0  # Don't center Z-axis (preserve base frame heights)
@@ -2087,12 +2118,25 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
             if meshes:
                 # Combine meshes for this component
                 component_combined = trimesh.util.concatenate(meshes)
+
+                # Repair non-manifold geometry for each component
+                component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
+                component_combined.remove_duplicate_faces()
+                component_combined.remove_degenerate_faces()
+                component_combined.remove_unreferenced_vertices()
+                component_combined.fix_normals()
+                component_combined.fill_holes()
+                # Final cleanup
+                component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
+                component_combined.remove_duplicate_faces()
+
                 # Center it the same way
                 component_combined.vertices -= center_offset
 
                 # DEBUG LOGGING
                 with open('/tmp/export_debug.log', 'a') as f:
                     f.write(f"  Combined: {len(component_combined.faces)} faces, {len(component_combined.vertices)} vertices\n")
+                    f.write(f"  Watertight: {component_combined.is_watertight}\n")
 
                 # Export to STL
                 component_filename = f'map_{timestamp}_{component_name}.stl'
