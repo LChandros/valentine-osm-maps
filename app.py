@@ -2170,15 +2170,12 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     for mat_name, meshes in obj_components:
         if meshes:
             combined_comp = trimesh.util.concatenate(meshes)
-            # Repair and center
-            combined_comp.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
+
+            # MINIMAL cleanup - NO merge_vertices (prevents non-manifolds)
+            # Same strategy as STL export (which has only 6 non-manifolds)
             combined_comp.remove_duplicate_faces()
             combined_comp.remove_degenerate_faces()
             combined_comp.remove_unreferenced_vertices()
-            combined_comp.fix_normals()
-            combined_comp.fill_holes()
-            combined_comp.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
-            combined_comp.remove_duplicate_faces()
             combined_comp.vertices -= center_offset
 
             obj_meshes.append(combined_comp)
@@ -2278,16 +2275,11 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
                 # Combine meshes for this component
                 component_combined = trimesh.util.concatenate(meshes)
 
-                # Repair non-manifold geometry for each component
-                component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
+                # MINIMAL cleanup - NO merge_vertices (prevents non-manifolds)
+                # Same strategy as main STL export (which has only 6 non-manifolds)
                 component_combined.remove_duplicate_faces()
                 component_combined.remove_degenerate_faces()
                 component_combined.remove_unreferenced_vertices()
-                component_combined.fix_normals()
-                component_combined.fill_holes()
-                # Final cleanup
-                component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
-                component_combined.remove_duplicate_faces()
 
                 # Center it the same way
                 component_combined.vertices -= center_offset
@@ -2332,16 +2324,12 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
 
     for component_name, meshes, description in scene_components:
         if meshes:
-            # Combine and repair meshes
+            # Combine meshes with MINIMAL cleanup (NO merge_vertices)
+            # Same strategy as main STL export (which has only 6 non-manifolds)
             component_combined = trimesh.util.concatenate(meshes)
-            component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=5)
             component_combined.remove_duplicate_faces()
             component_combined.remove_degenerate_faces()
             component_combined.remove_unreferenced_vertices()
-            component_combined.fix_normals()
-            component_combined.fill_holes()
-            component_combined.merge_vertices(merge_tex=True, merge_norm=True, digits_vertex=6)
-            component_combined.remove_duplicate_faces()
 
             # Center it
             component_combined.vertices -= center_offset
