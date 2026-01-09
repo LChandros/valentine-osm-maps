@@ -863,12 +863,13 @@ def create_pyramid_roof(polygon, base_z, roof_height):
 def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, circle_boundary=None, config=None):
     """
     Convert building footprints to 3D meshes with configurable parameters.
-    Returns list of trimesh objects.
+    Returns tuple of (meshes, building_polygons) where building_polygons are 2D Shapely polygons.
     """
     if config is None:
         config = ModelConfig()
 
     meshes = []
+    building_polygons = []  # Collect 2D footprints for subtracting from footpaths
 
     for i, building in enumerate(buildings):
         try:
@@ -928,6 +929,9 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
             # Validate polygon after simplification
             if not polygon.is_valid or polygon.is_empty or polygon.area < 0.5:
                 continue
+
+            # Save polygon for subtracting from footpaths
+            building_polygons.append(polygon)
 
             # Extrude to 3D with vertical exaggeration
             height_meters = building['height']
@@ -1087,8 +1091,8 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
             print(f"Error creating mesh for building {i}: {e}")
             continue
 
-    print(f"Created {len(meshes)} valid building meshes")
-    return meshes
+    print(f"Created {len(meshes)} valid building meshes ({len(building_polygons)} polygons for footpath clipping)")
+    return meshes, building_polygons
 
 
 def create_heart_mesh(size_mm=8, height_mm=5):
@@ -1462,8 +1466,9 @@ def create_road_meshes(roads, center_lat, center_lon, scale_factor=1.0, circle_b
     return meshes
 
 
-def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, circle_boundary=None, config=None):
-    """Create thin extruded footpath meshes with configurable parameters"""
+def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, circle_boundary=None, config=None, building_polygons=None):
+    """Create thin extruded footpath meshes with configurable parameters.
+    Footpaths are clipped by building polygons to avoid rendering underneath buildings."""
     if config is None:
         config = ModelConfig()
 
@@ -1533,6 +1538,15 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
                     # Clip to circular boundary for curved edge
                     if circle_boundary:
                         footpath_polygon = footpath_polygon.intersection(circle_boundary)
+                        if footpath_polygon.is_empty:
+                            continue
+
+                    # Subtract building footprints so footpaths don't render under buildings
+                    if building_polygons:
+                        for building_poly in building_polygons:
+                            footpath_polygon = footpath_polygon.difference(building_poly)
+                            if footpath_polygon.is_empty:
+                                break
                         if footpath_polygon.is_empty:
                             continue
 
@@ -1858,11 +1872,11 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # IMPORTANT: Different boundaries for different feature types:
     # - Water, Roads, Footpaths: 70mm (extend to border ring inner edge, cut off cleanly)
     # - Parks, Buildings: 68mm (2mm gap for cleaner separation)
-    building_meshes = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
+    building_meshes, building_polygons = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
     water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_water, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
     road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary_water, config)
-    footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary_water, config) if config.footpath_enabled else []
+    footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary_water, config, building_polygons=building_polygons) if config.footpath_enabled else []
 
     # Apply boolean operations to handle overlapping features (prevents z-fighting)
     # Footpaths "cut through" roads and parks where they intersect
