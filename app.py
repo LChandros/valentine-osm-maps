@@ -1292,7 +1292,7 @@ def create_road_meshes(roads, center_lat, center_lon, scale_factor=1.0, circle_b
 
     meshes = []
     road_width = 2.0 * config.road_width_multiplier  # mm, with multiplier
-    road_base_z = -0.40 + config.road_depth_mm  # mm - starts at water top level (map2model: -0.40)
+    road_base_z = 0.0 + config.road_depth_mm  # mm - sits on top of base plate at z=0
     road_thickness = config.road_height_mm  # mm - configurable height
     road_top_z = road_base_z + road_thickness
 
@@ -1383,7 +1383,7 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
     footpath_width_mm = config.footpath_width_m * scale_factor  # Width in mm after scaling
     # Footpaths sit on base (same as roads and parks)
     # Boolean operations will handle overlaps to prevent z-fighting
-    footpath_base_z = -0.40  # mm - starts at water top level (map2model: -0.40)
+    footpath_base_z = 0.0  # mm - sits on top of base plate at z=0
     footpath_thickness = config.footpath_height_mm  # mm - configurable height
     footpath_top_z = footpath_base_z + footpath_thickness
 
@@ -1466,18 +1466,19 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
 
 def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     """
-    Create a circular base plate with water cutouts (map2model approach).
+    Create a circular base plate with water depressions (map2model approach).
 
     Structure:
-    - Circular base from z = -thickness_mm to z = 0 (BELOW bed level)
-    - Water sits at z=-0.80 to -0.40 (negative Z, inside base volume)
-    - Base has HOLES where water is located (boolean difference)
-    - Water visible through holes, roads/footpaths start at water top (-0.40)
+    - Base has TWO layers:
+      1. Solid floor everywhere: z=-1.0 to z=-0.80 (provides floor under water)
+      2. Walls with water cutouts: z=-0.80 to z=0.0 (water-shaped depressions)
+    - Water sits in depressions: z=-0.80 to -0.40
+    - Roads/parks sit on top: z=0.0 upward
 
     Args:
         size_mm: Diameter of base plate
         thickness_mm: Thickness of base (default 1mm)
-        water_polygons: List of Shapely polygons to cut from base (water locations)
+        water_polygons: List of Shapely polygons for water depressions
     """
     from shapely.geometry import Polygon, Point
     from shapely.ops import unary_union
@@ -1489,60 +1490,76 @@ def create_base_plate(size_mm=150, thickness_mm=1, water_polygons=None):
     # Create circular base polygon
     angles = np.linspace(0, 2*np.pi, resolution, endpoint=False)
     circle_coords = [[radius * np.cos(a), radius * np.sin(a)] for a in angles]
-    base_polygon = Polygon(circle_coords)
+    circle_polygon = Polygon(circle_coords)
 
-    # Subtract water polygons from base (creates holes)
-    if water_polygons and len(water_polygons) > 0:
-        print(f"DEBUG: create_base_plate received {len(water_polygons)} water polygons")
-        try:
-            # Union all water polygons
-            water_union = unary_union(water_polygons)
-            print(f"DEBUG: Water union area: {water_union.area:.2f} mm²")
+    # TWO-LAYER APPROACH (map2model style):
+    # Layer 1: Solid floor everywhere (z=-1.0 to z=-0.80)
+    # Layer 2: Walls with water cutouts (z=-0.80 to z=0.0)
 
-            # Subtract water from base to create holes
-            base_before_area = base_polygon.area
-            base_polygon = base_polygon.difference(water_union)
-            base_after_area = base_polygon.area if hasattr(base_polygon, 'area') else 0
-
-            print(f"DEBUG: Base area before cutout: {base_before_area:.2f} mm²")
-            print(f"DEBUG: Base area after cutout: {base_after_area:.2f} mm²")
-            print(f"DEBUG: Base polygon type after difference: {base_polygon.geom_type}")
-
-            # Handle MultiPolygon (if water splits base into pieces)
-            # IMPORTANT: Keep ALL pieces, not just the largest!
-            if base_polygon.geom_type == 'MultiPolygon':
-                print(f"DEBUG: Base split into {len(base_polygon.geoms)} pieces - KEEPING ALL")
-        except Exception as e:
-            print(f"WARNING: Failed to cut water from base: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fall back to solid base if boolean operation fails
-            pass
-    else:
-        print(f"DEBUG: No water polygons provided to create_base_plate")
-
-    # Now triangulate the polygon (with holes) into a mesh
-    # Bottom face (at z = -thickness_mm)
     try:
         from trimesh.creation import extrude_polygon
 
-        # Handle both Polygon and MultiPolygon
-        if base_polygon.geom_type == 'MultiPolygon':
+        # ===== LAYER 1: SOLID FLOOR (z=-1.0 to z=-0.80) =====
+        # This is ALWAYS solid - no water cutouts
+        floor_height = 0.20  # mm (from z=-1.0 to z=-0.80)
+        floor_mesh = extrude_polygon(circle_polygon, height=floor_height)
+        floor_mesh.apply_translation([0, 0, -1.0])  # Bottom at z=-1.0, top at z=-0.80
+        print(f"DEBUG: Created solid floor layer: z=-1.0 to z=-0.80")
+
+        # ===== LAYER 2: WALLS WITH WATER CUTOUTS (z=-0.80 to z=0.0) =====
+        walls_height = 0.80  # mm (from z=-0.80 to z=0.0)
+        walls_polygon = circle_polygon
+
+        # Subtract water polygons from walls layer
+        if water_polygons and len(water_polygons) > 0:
+            print(f"DEBUG: create_base_plate received {len(water_polygons)} water polygons")
+            try:
+                # Union all water polygons
+                water_union = unary_union(water_polygons)
+                print(f"DEBUG: Water union area: {water_union.area:.2f} mm²")
+
+                # Subtract water from walls to create depressions
+                walls_before_area = walls_polygon.area
+                walls_polygon = walls_polygon.difference(water_union)
+                walls_after_area = walls_polygon.area if hasattr(walls_polygon, 'area') else 0
+
+                print(f"DEBUG: Walls area before cutout: {walls_before_area:.2f} mm²")
+                print(f"DEBUG: Walls area after cutout: {walls_after_area:.2f} mm²")
+                print(f"DEBUG: Walls polygon type after difference: {walls_polygon.geom_type}")
+
+                # Handle MultiPolygon (if water splits walls into pieces)
+                # IMPORTANT: Keep ALL pieces, not just the largest!
+                if walls_polygon.geom_type == 'MultiPolygon':
+                    print(f"DEBUG: Walls split into {len(walls_polygon.geoms)} pieces - KEEPING ALL")
+            except Exception as e:
+                print(f"WARNING: Failed to cut water from walls: {e}")
+                import traceback
+                traceback.print_exc()
+                # Fall back to solid walls if boolean operation fails
+                pass
+        else:
+            print(f"DEBUG: No water polygons provided - walls will be solid")
+
+        # Extrude walls layer
+        if walls_polygon.geom_type == 'MultiPolygon':
             # Extrude each piece separately and combine
-            meshes = []
-            for poly in base_polygon.geoms:
-                piece_mesh = extrude_polygon(poly, height=thickness_mm)
-                piece_mesh.apply_translation([0, 0, -thickness_mm])
-                meshes.append(piece_mesh)
-            # Combine all pieces into single mesh
-            mesh = trimesh.util.concatenate(meshes)
-            print(f"DEBUG: Combined {len(meshes)} base pieces into single mesh")
+            walls_meshes = []
+            for poly in walls_polygon.geoms:
+                piece_mesh = extrude_polygon(poly, height=walls_height)
+                piece_mesh.apply_translation([0, 0, -0.80])  # Bottom at z=-0.80, top at z=0.0
+                walls_meshes.append(piece_mesh)
+            walls_mesh = trimesh.util.concatenate(walls_meshes)
+            print(f"DEBUG: Combined {len(walls_meshes)} wall pieces into single mesh")
         else:
             # Single polygon - extrude normally
-            mesh = extrude_polygon(base_polygon, height=thickness_mm)
-            # Trimesh extrudes upward from z=0, so translate DOWN to get z=-thickness to z=0
-            # (map2model: base from z=-1.0 to z=0.0, water at z=-0.80 to -0.40 inside base volume)
-            mesh.apply_translation([0, 0, -thickness_mm])
+            walls_mesh = extrude_polygon(walls_polygon, height=walls_height)
+            walls_mesh.apply_translation([0, 0, -0.80])  # Bottom at z=-0.80, top at z=0.0
+
+        print(f"DEBUG: Created walls layer with water depressions: z=-0.80 to z=0.0")
+
+        # ===== COMBINE BOTH LAYERS =====
+        mesh = trimesh.util.concatenate([floor_mesh, walls_mesh])
+        print(f"DEBUG: Combined floor and walls into single base plate mesh")
 
     except Exception as e:
         print(f"Warning: Failed to extrude base with holes: {e}")
