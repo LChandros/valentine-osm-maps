@@ -120,7 +120,7 @@ class ModelConfig:
         self.water_color = "#1479C6"  # Blue
         self.water_height_mm = 0.40
         self.water_depth_mm = 0.80
-        self.water_min_area_m2 = 50.0  # ~7m x 7m minimum - includes small ponds and fountains
+        self.water_min_area_m2 = 500.0  # Only major water features (rivers, large ponds)
         self.water_include_sea = False
         self.water_cut_out = False
         self.water_base = False
@@ -607,17 +607,13 @@ def query_osm_water(lat, lon, radius_meters=300, config=None):
 
     bbox = create_bbox(lat, lon, radius_meters)
 
-    # Query for VISIBLE water features only (exclude underground infrastructure)
+    # Query for VISIBLE water features only (specific types only, no catch-alls)
     query = f"""
     [out:json][timeout:25];
     (
       way["natural"="water"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["waterway"="river"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
-      way["waterway"="stream"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       way["waterway"="canal"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
-      way["waterway"]["waterway"!="drain"]["waterway"!="ditch"]["waterway"!="culvert"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
-      way["leisure"="swimming_pool"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
-      way["amenity"="fountain"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
       relation["natural"="water"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
     );
     out body;
