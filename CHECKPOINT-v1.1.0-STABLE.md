@@ -1,0 +1,219 @@
+# ✅ CHECKPOINT - v1.1.0 STABLE RELEASE
+**Date:** 2026-01-09 21:30 UTC
+**Status:** 🎉 **PRODUCTION READY - USER VERIFIED**
+
+---
+
+## 🎯 MAJOR SUCCESS
+
+**Non-Manifold Problem SOLVED!**
+
+Reduced from 400+ non-manifolds to ~6 (matching map2model quality)!
+
+---
+
+## 🔐 Recovery Information
+
+### Git Tag
+```bash
+git checkout v1.1.0-stable
+```
+
+### Commit Hash
+```
+db7b072 - Fix OBJ and split exports - remove ALL merge_vertices calls
+```
+
+### GitHub Repository
+```
+https://github.com/LChandros/valentine-osm-maps
+Tag: v1.1.0-stable
+```
+
+---
+
+## ✅ Verified Working Features
+
+### Non-Manifold Counts (All ~6!)
+- [x] STL: 6 non-manifolds (was ~400)
+- [x] OBJ: 6 non-manifolds (was 626!)
+- [x] Split STLs: ~6 each
+- [x] 3MF Scene: ~6 total
+
+### Export Formats
+- [x] STL (single file preview)
+- [x] 3MF (vertex colors)
+- [x] PLY (full color)
+- [x] OBJ+MTL (multi-material) ⭐
+- [x] Split ZIP (all formats)
+
+### Material Colors (All Working!)
+- [x] Water: #3399FF (light blue)
+- [x] Base: #FFFFFF (white)
+- [x] Border Ring: #FFFFFF (white)
+- [x] Parks: #0FE300 (bright green) ✓ Rendering correctly!
+- [x] Roads: #262626 (dark gray)
+- [x] Footpaths: #262626 (dark gray)
+- [x] Buildings: #B8B8B8 (light gray)
+
+### Map Features
+- [x] Water cutouts in base
+- [x] Circular boundary with border ring
+- [x] Features clipped to 70mm radius
+- [x] Parks with interior holes preserved
+- [x] Curved boundary edges
+- [x] Building vertical exaggeration
+- [x] Minimal non-manifold edges (~6)
+
+---
+
+## 🔧 What Changed from v1.0.0
+
+### The Discovery Process
+1. Started with ~400 non-manifolds in v1.0.0
+2. Tried per-component merge_vertices → 551 non-manifolds (WORSE!)
+3. User observation: "STL has 6, OBJ has 626"
+4. Identified merge_vertices as the problem
+5. Removed ALL merge_vertices calls
+6. Result: All formats now have ~6 non-manifolds!
+
+### Code Changes
+**Removed merge_vertices() from 4 locations:**
+1. Main assembly: `combine_component_mesh()` function
+2. OBJ export: per-component repair
+3. Split STL export: per-component repair
+4. 3MF scene export: per-component repair
+
+**New minimal cleanup strategy:**
+```python
+component.remove_duplicate_faces()
+component.remove_degenerate_faces()
+component.remove_unreferenced_vertices()
+# NO merge_vertices, fix_normals, or fill_holes!
+```
+
+---
+
+## 📂 File Locations
+
+### Source Code
+```
+/root/valentine-maps/app.py (main application)
+```
+
+### Critical Code Sections
+- **Component combining:** app.py line 1977 (combine_component_mesh)
+- **OBJ Export:** app.py line 2174
+- **Split STL:** app.py line 2278
+- **3MF Scene:** app.py line 2327
+
+### Documentation
+```
+/root/valentine-maps/README_BAMBU.txt
+/root/valentine-maps/RELEASE_NOTES_v1.1.0.md
+/root/valentine-maps/CHECKPOINT-v1.1.0-STABLE.md (this file)
+/root/valentine-maps/color_mapping.json
+```
+
+---
+
+## 🚀 Deployment Status
+
+**Server:** http://159.65.245.152:5000/
+**PM2 Process:** valentine-maps (id: 7)
+**Status:** ✅ Online and serving
+
+**Start Server:**
+```bash
+pm2 start valentine-maps
+```
+
+**View Logs:**
+```bash
+pm2 logs valentine-maps
+```
+
+---
+
+## 🎨 Testing Confirmation
+
+**Test Location:** Schenley Park, Pittsburgh (40.4351, -79.9545)
+**Test Date:** 2026-01-09
+**Tester Feedback:** "Much better! Publish that."
+
+**Verified:**
+- ✅ Parks rendering (green spaces visible)
+- ✅ All materials correct
+- ✅ Non-manifolds reduced to ~6
+- ✅ Clean geometry for slicing
+
+---
+
+## 💾 Backup Locations
+
+1. **Git Remote:** GitHub (pushed with tag)
+2. **Local Backup:** /root/backups/valentine-maps-v1.1.0-stable-*.tar.gz (created below)
+3. **Server:** Running on Digital Ocean droplet
+4. **Release Notes:** RELEASE_NOTES_v1.1.0.md
+5. **Checkpoint:** This file
+
+---
+
+## 📊 Performance Comparison
+
+| Version | STL Non-Manifolds | OBJ Non-Manifolds | Status |
+|---------|------------------|------------------|--------|
+| v1.0.0 | ~400 | 626 | ❌ Poor |
+| v1.1.0 | 6 | 6 | ✅ Excellent |
+| map2model | ~6 | N/A | ✅ Target |
+
+**We now match map2model quality!**
+
+---
+
+## ⚠️ CRITICAL: DO NOT MODIFY
+
+**These functions are PERFECT - do not change without testing:**
+
+1. `combine_component_mesh()` - Line 1977
+   - NO merge_vertices
+   - Minimal cleanup only
+
+2. OBJ export cleanup - Line 2174
+   - NO merge_vertices
+   - Same minimal strategy
+
+3. Split STL export - Line 2278
+   - NO merge_vertices
+   - Same minimal strategy
+
+4. 3MF scene export - Line 2327
+   - NO merge_vertices
+   - Same minimal strategy
+
+**Any changes require full non-manifold testing!**
+
+---
+
+## 🔄 Version History
+
+- **v1.0.0-stable:** OBJ+MTL export working, but 400+ non-manifolds
+- **v1.1.0-stable:** Non-manifold problem solved (~6 non-manifolds) ⭐
+
+---
+
+## 💬 User Quotes
+
+> "Fascinating! The combined .stl file has only 6 non manifolds, thats excellent. But the .obj file still contains 626!"
+
+This observation led to the breakthrough!
+
+> "Much better! Publish that."
+
+Final confirmation after testing with green spaces.
+
+---
+
+**THIS VERSION IS PRODUCTION READY!**
+
+*Generated by Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)*
