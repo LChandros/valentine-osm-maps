@@ -1524,28 +1524,47 @@ def create_footpath_meshes(footpaths, center_lat, center_lon, scale_factor=1.0, 
                         p2 - perp * half_width,
                     ]
 
-                    vertices = []
-                    # Bottom layer (at footpath_base_z)
-                    for x, y in corners:
-                        vertices.append([x, y, footpath_base_z])
-                    # Top layer
-                    for x, y in corners:
-                        vertices.append([x, y, footpath_top_z])
+                    # Clip footpath polygon to circular boundary for curved edges
+                    from shapely.geometry import Polygon
+                    from trimesh.creation import extrude_polygon as trimesh_extrude
 
-                    faces = [
-                        # Bottom
-                        [0, 2, 1], [0, 3, 2],
-                        # Top
-                        [4, 5, 6], [4, 6, 7],
-                        # Sides
-                        [0, 1, 5], [0, 5, 4],
-                        [1, 2, 6], [1, 6, 5],
-                        [2, 3, 7], [2, 7, 6],
-                        [3, 0, 4], [3, 4, 7],
-                    ]
+                    footpath_polygon = Polygon([[c[0], c[1]] for c in corners])
 
-                    mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
-                    meshes.append(mesh)
+                    # Clip to circular boundary for curved edge
+                    if circle_boundary:
+                        footpath_polygon = footpath_polygon.intersection(circle_boundary)
+                        if footpath_polygon.is_empty:
+                            continue
+
+                    # Use extrude_polygon for proper curved edges
+                    try:
+                        mesh = trimesh_extrude(footpath_polygon, height=footpath_thickness)
+                        mesh.apply_translation([0, 0, footpath_base_z])
+                        meshes.append(mesh)
+                    except Exception as e:
+                        # Fallback to original method if extrusion fails
+                        vertices = []
+                        # Bottom layer (at footpath_base_z)
+                        for x, y in corners:
+                            vertices.append([x, y, footpath_base_z])
+                        # Top layer
+                        for x, y in corners:
+                            vertices.append([x, y, footpath_top_z])
+
+                        faces = [
+                            # Bottom
+                            [0, 2, 1], [0, 3, 2],
+                            # Top
+                            [4, 5, 6], [4, 6, 7],
+                            # Sides
+                            [0, 1, 5], [0, 5, 4],
+                            [1, 2, 6], [1, 6, 5],
+                            [2, 3, 7], [2, 7, 6],
+                            [3, 0, 4], [3, 4, 7],
+                        ]
+
+                        mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
+                        meshes.append(mesh)
         except Exception as e:
             continue
 
