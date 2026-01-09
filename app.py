@@ -120,7 +120,7 @@ class ModelConfig:
         self.water_color = "#1479C6"  # Blue
         self.water_height_mm = 0.40
         self.water_depth_mm = 0.80
-        self.water_min_area_m2 = 500.0  # Only major water features (rivers, large ponds)
+        self.water_min_area_m2 = 100.0  # Rivers and major water features (reduced from 500 to catch rivers)
         self.water_include_sea = False
         self.water_cut_out = False
         self.water_base = False
@@ -1819,9 +1819,12 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
                 # Keep original park meshes on failure
 
     # Create base plate with water cutouts (z=-1.0 to z=0.0, matching map2model)
-    base = create_base_plate(BASE_SIZE_MM, 1, water_polygons=water_polygons)
+    # Base stops at inner edge of border ring (70mm radius) to avoid overlap
+    BASE_INNER_SIZE_MM = BASE_SIZE_MM - 10  # 140mm diameter (70mm radius)
+    base = create_base_plate(BASE_INNER_SIZE_MM, 1, water_polygons=water_polygons)
 
     # Create border ring (z=-1.0 to z=0.40, matching map2model component FFFFFF_02)
+    # Border ring wraps around base: outer 75mm, inner 70mm
     border_ring = create_border_ring(BASE_SIZE_MM, ring_width_mm=5)
 
     # Center offset (will be applied to all)
