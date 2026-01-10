@@ -649,11 +649,31 @@
         let map;
         let marker;
         let circle;
+        let outerCircle;  // Query area indicator
 
         // Default location (Pittsburgh)
         let currentLat = 40.4406;
         let currentLon = -79.9959;
         let currentRadius = 300;
+
+        // Calculate actual feature radius (matches backend clipping logic)
+        // Backend clips features to make room for 5mm border ring
+        function calculateFeatureRadius(queryRadius) {
+            const BASE_SIZE_MM = 150;
+            const BORDER_WIDTH_MM = 5.0;
+            const FEATURE_GAP_MM = 2.0;
+
+            // Calculate scale factor (same as backend: app.py line 1829)
+            const maxExtent = queryRadius * 2;
+            const scaleFactor = BASE_SIZE_MM / maxExtent;
+
+            // Parks/buildings are clipped with 7mm gap (5mm border + 2mm feature gap)
+            // This is the most visible boundary to users
+            const featureRadiusReductionMeters = (BORDER_WIDTH_MM + FEATURE_GAP_MM) / scaleFactor;
+            const featureRadius = queryRadius - featureRadiusReductionMeters;
+
+            return featureRadius;
+        }
 
         // Initialize map
         function initMap() {
@@ -683,14 +703,34 @@
 
             marker.bindPopup('<b>Your Special Place ❤️</b><br>Drag me to adjust location!').openPopup();
 
-            // Add radius circle
-            circle = L.circle([currentLat, currentLon], {
+            // Add outer circle (faded) showing query area
+            outerCircle = L.circle([currentLat, currentLon], {
                 radius: currentRadius,
+                color: '#e63946',
+                fillColor: '#e63946',
+                fillOpacity: 0.05,
+                weight: 1,
+                dashArray: '5, 5',
+                opacity: 0.3
+            }).addTo(map);
+
+            // Add main circle showing actual feature boundary (parks/buildings)
+            const featureRadius = calculateFeatureRadius(currentRadius);
+            circle = L.circle([currentLat, currentLon], {
+                radius: featureRadius,
                 color: '#e63946',
                 fillColor: '#e63946',
                 fillOpacity: 0.2,
                 weight: 2
             }).addTo(map);
+
+            // Add tooltip to explain the circles
+            circle.bindTooltip(
+                `<strong>Feature Boundary</strong><br>` +
+                `Parks/buildings extend to here<br>` +
+                `(${Math.round(featureRadius)}m radius)`,
+                { permanent: false, direction: 'top' }
+            );
 
             // Update coordinates when marker is dragged
             marker.on('dragend', function(e) {
@@ -721,9 +761,23 @@
 
         // Update circle when radius changes
         function updateCircle() {
+            const featureRadius = calculateFeatureRadius(currentRadius);
+
+            if (outerCircle) {
+                outerCircle.setLatLng([currentLat, currentLon]);
+                outerCircle.setRadius(currentRadius);
+            }
+
             if (circle) {
                 circle.setLatLng([currentLat, currentLon]);
-                circle.setRadius(currentRadius);
+                circle.setRadius(featureRadius);
+
+                // Update tooltip with new radius
+                circle.setTooltipContent(
+                    `<strong>Feature Boundary</strong><br>` +
+                    `Parks/buildings extend to here<br>` +
+                    `(${Math.round(featureRadius)}m radius)`
+                );
             }
         }
 
