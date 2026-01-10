@@ -651,9 +651,9 @@
         let circle;
         let outerCircle;  // Query area indicator
 
-        // Default location (Pittsburgh)
-        let currentLat = 40.4406;
-        let currentLon = -79.9959;
+        // Default location (PNC Park, Pittsburgh - for easy map2model comparison)
+        let currentLat = 40.4469;
+        let currentLon = -80.0056;
         let currentRadius = 300;
 
         // Calculate actual feature radius (matches backend clipping logic)
@@ -701,7 +701,7 @@
                 draggable: true
             }).addTo(map);
 
-            marker.bindPopup('<b>Your Special Place ❤️</b><br>Drag me to adjust location!').openPopup();
+            marker.bindPopup('<b>PNC Park ⚾</b><br>Default test location (easy map2model comparison)<br>Drag me to adjust location!').openPopup();
 
             // Add outer circle (faded) showing query area
             outerCircle = L.circle([currentLat, currentLon], {
