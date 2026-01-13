@@ -2000,33 +2000,18 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         pin_shapely = Point(pin_x, pin_y)
 
         # Check if pin intersects any building polygon
-        # For multipart buildings (like Cathedral of Learning), find ALL parts near the pin point
-        # Strategy: Find exact intersections first, then find nearby buildings within 20mm radius
+        # Strategy: ONLY exact intersection - pin point must be within the building footprint
+        # This ensures we only color the specific building the user clicked on
         # NOTE: building_polygons, building_meshes, and building_indices are all aligned
-
-        # First pass: exact intersections
         for mesh_idx, (polygon, orig_idx) in enumerate(zip(building_polygons, building_indices)):
             if polygon is not None and pin_shapely.within(polygon):
-                print(f"✓ Pin directly intersects building (original #{orig_idx}, mesh #{mesh_idx})")
+                print(f"✓ Pin intersects building (original #{orig_idx}, mesh #{mesh_idx})")
                 pin_building_mesh_indices.append(mesh_idx)
-
-        # Second pass: if we hit at least one building, find nearby building parts
-        # (This handles Cathedral-style multipart buildings where tower is above but not same footprint)
-        if pin_building_mesh_indices:
-            search_radius = 20.0  # mm - search for building parts within 20mm of pin
-            pin_buffer = pin_shapely.buffer(search_radius)
-
-            for mesh_idx, (polygon, orig_idx) in enumerate(zip(building_polygons, building_indices)):
-                if mesh_idx not in pin_building_mesh_indices and polygon is not None:
-                    # Check if this building part overlaps with our search radius
-                    if polygon.intersects(pin_buffer):
-                        print(f"✓ Found nearby building part (original #{orig_idx}, mesh #{mesh_idx}) within {search_radius}mm")
-                        pin_building_mesh_indices.append(mesh_idx)
 
         # If no building hit, create a heart mesh at pin location
         building_hit = len(pin_building_mesh_indices) > 0
         if building_hit:
-            print(f"✓ Pin hit {len(pin_building_mesh_indices)} building part(s) total - will color all red")
+            print(f"✓ Pin hit {len(pin_building_mesh_indices)} building part(s) - will color all red")
         if not building_hit:
             print(f"✓ Pin not on building - Creating raised heart marker at ({pin_x:.2f}, {pin_y:.2f})")
             pin_marker_mesh = create_heart_mesh(pin_x, pin_y, scale_factor, config)
@@ -2369,14 +2354,38 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
     )
     materials['buildings'] = SimpleMaterial(
         name='buildings',
-        diffuse=[184/255, 184/255, 184/255, 1.0],  # #B8B8B8
+        diffuse=[184/255, 184/255, 184/255, 1.0],  # #B8B8B8 (gray)
         ambient=[184/255, 184/255, 184/255, 1.0]
+    )
+    materials['red_buildings'] = SimpleMaterial(
+        name='red_buildings',
+        diffuse=[230/255, 57/255, 70/255, 1.0],  # #E63946 (Valentine red)
+        ambient=[230/255, 57/255, 70/255, 1.0]
     )
 
     # Combine meshes with material tracking
     obj_meshes = []
     obj_material_ids = []
     current_face_offset = 0
+
+    # Separate gray and red buildings for OBJ export
+    # Use the ORIGINAL building_meshes list (not the colored/separated versions from PLY export)
+    gray_building_meshes_obj = []
+    red_building_meshes_obj = []
+
+    if pin_building_mesh_indices:
+        # We have red buildings - separate them
+        for idx, mesh in enumerate(building_meshes):
+            if idx in pin_building_mesh_indices:
+                # Make a copy and raise by 0.1mm (same as PLY export)
+                mesh_copy = mesh.copy()
+                mesh_copy.vertices[:, 2] += 0.1
+                red_building_meshes_obj.append(mesh_copy)
+            else:
+                gray_building_meshes_obj.append(mesh)
+    else:
+        # No red buildings - all gray
+        gray_building_meshes_obj = building_meshes
 
     # Order matters - same as vertex color layering
     obj_components = [
@@ -2386,7 +2395,9 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         ('parks', park_meshes),
         ('roads', road_meshes),
         ('footpaths', footpath_meshes),
-        ('buildings', building_meshes)
+        ('buildings', gray_building_meshes_obj),  # Gray buildings
+        ('red_buildings', red_building_meshes_obj),  # Red buildings (if any)
+        ('red_buildings', [pin_marker_mesh] if pin_marker_mesh else [])  # Heart marker (if any)
     ]
 
     for mat_name, meshes in obj_components:
@@ -2478,14 +2489,17 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
 
     with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
         # Export each feature type separately
+        # Use same gray/red building separation as OBJ export
         components = [
             ('water', water_meshes),
             ('base', [base]),
-            ('border_ring', [border_ring]),  # NEW: 8th component (FFFFFF_02)
+            ('border_ring', [border_ring]),
             ('parks', park_meshes),
             ('roads', road_meshes),
             ('footpaths', footpath_meshes),
-            ('buildings', building_meshes)
+            ('buildings', gray_building_meshes_obj),  # Gray buildings only
+            ('red_buildings', red_building_meshes_obj),  # Red buildings (if any)
+            ('heart', [pin_marker_mesh] if pin_marker_mesh else [])  # Heart marker (if any)
         ]
 
         for component_name, meshes in components:
@@ -2534,6 +2548,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
     scene = trimesh.Scene()
 
     # Add each component as a separate named object
+    # Use same gray/red building separation
     scene_components = [
         ('water', water_meshes, 'Water features'),
         ('base', [base], 'Base plate with floor and walls'),
@@ -2541,7 +2556,9 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         ('parks', park_meshes, 'Parks and green spaces'),
         ('roads', road_meshes, 'Roads'),
         ('footpaths', footpath_meshes, 'Footpaths'),
-        ('buildings', building_meshes, 'Buildings')
+        ('buildings', gray_building_meshes_obj, 'Buildings (gray)'),
+        ('red_buildings', red_building_meshes_obj, 'Red buildings (pin marker)'),
+        ('heart', [pin_marker_mesh] if pin_marker_mesh else [], 'Heart marker (pin on open space)')
     ]
 
     for component_name, meshes, description in scene_components:
