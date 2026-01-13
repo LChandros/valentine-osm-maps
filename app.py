@@ -863,13 +863,17 @@ def create_pyramid_roof(polygon, base_z, roof_height):
 def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, circle_boundary=None, config=None):
     """
     Convert building footprints to 3D meshes with configurable parameters.
-    Returns tuple of (meshes, building_polygons) where building_polygons are 2D Shapely polygons.
+    Returns tuple of (meshes, building_polygons, building_indices) where:
+    - meshes: list of Trimesh objects
+    - building_polygons: list of 2D Shapely polygons for intersection detection
+    - building_indices: list of original building indices (for matching pin to mesh)
     """
     if config is None:
         config = ModelConfig()
 
     meshes = []
     building_polygons = []  # Collect 2D footprints for subtracting from footpaths
+    building_indices = []  # Track original building index for each polygon/mesh
 
     for i, building in enumerate(buildings):
         try:
@@ -930,8 +934,9 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
             if not polygon.is_valid or polygon.is_empty or polygon.area < 0.5:
                 continue
 
-            # Save polygon for subtracting from footpaths
+            # Save polygon and original index for pin intersection detection
             building_polygons.append(polygon)
+            building_indices.append(i)  # Track original building index
 
             # Extrude to 3D with vertical exaggeration
             height_meters = building['height']
@@ -1092,7 +1097,7 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
             continue
 
     print(f"Created {len(meshes)} valid building meshes ({len(building_polygons)} polygons for footpath clipping)")
-    return meshes, building_polygons
+    return meshes, building_polygons, building_indices
 
 
 def create_heart_mesh(size_mm=8, height_mm=5):
@@ -1805,20 +1810,122 @@ def apply_vertex_colors(meshes, hex_color):
     return colored_meshes
 
 
+def create_heart_mesh(x, y, scale_factor, config):
+    """
+    Create a 3D heart mesh at the specified position for pin location marker.
+
+    Args:
+        x, y: Position in local coordinate system (mm)
+        scale_factor: Scale factor for sizing
+        config: Model configuration (unused, for API consistency)
+
+    Returns:
+        trimesh.Trimesh: Heart mesh colored Valentine red
+    """
+    # Heart parameters (in mm)
+    heart_size = 15.0  # Overall heart size (mm) - increased for visibility
+    heart_height = 8.0  # Raised above base (mm) - taller for better presence
+
+    # Base plate is from z=-1.0 to z=0.0 (1mm total)
+    # Heart sits on top of base at z=0.0
+    base_top_z = 0.0
+
+    # Create heart shape using parametric equations
+    # Heart curve: x = 16*sin^3(t), y = 13*cos(t) - 5*cos(2t) - 2*cos(3t) - cos(4t)
+    t = np.linspace(0, 2 * np.pi, 50)
+    heart_x = 16 * np.sin(t)**3
+    heart_y = 13 * np.cos(t) - 5 * np.cos(2*t) - 2 * np.cos(3*t) - np.cos(4*t)
+
+    # Scale to desired size
+    scale = heart_size / 32.0  # Original heart has width ~32
+    heart_x = heart_x * scale
+    heart_y = heart_y * scale
+
+    # Offset to center position
+    heart_x = heart_x + x
+    heart_y = heart_y + y
+
+    # Create bottom and top profiles
+    bottom_z = base_top_z
+    top_z = base_top_z + heart_height
+
+    # Build vertices for extruded heart
+    vertices = []
+    # Bottom vertices
+    for hx, hy in zip(heart_x, heart_y):
+        vertices.append([hx, hy, bottom_z])
+    # Top vertices
+    for hx, hy in zip(heart_x, heart_y):
+        vertices.append([hx, hy, top_z])
+
+    vertices = np.array(vertices)
+    n_points = len(heart_x)
+
+    # Create faces for extruded heart
+    faces = []
+
+    # Bottom cap (triangulated from center)
+    center_bottom_idx = len(vertices)
+    vertices = np.vstack([vertices, [[x, y, bottom_z]]])
+    for i in range(n_points):
+        next_i = (i + 1) % n_points
+        faces.append([center_bottom_idx, next_i, i])
+
+    # Top cap (triangulated from center)
+    center_top_idx = len(vertices)
+    vertices = np.vstack([vertices, [[x, y, top_z]]])
+    for i in range(n_points):
+        next_i = (i + 1) % n_points
+        faces.append([center_top_idx, n_points + i, n_points + next_i])
+
+    # Side walls
+    for i in range(n_points):
+        next_i = (i + 1) % n_points
+        # Two triangles per wall segment
+        faces.append([i, next_i, n_points + i])
+        faces.append([next_i, n_points + next_i, n_points + i])
+
+    faces = np.array(faces)
+
+    # Create mesh
+    heart_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+
+    # Repair mesh to ensure it's manifold
+    heart_mesh.remove_degenerate_faces()
+    heart_mesh.remove_duplicate_faces()
+    heart_mesh.fix_normals()
+
+    # Color it Valentine red (#E63946)
+    valentine_red = [230, 57, 70, 255]  # RGBA
+    vertex_colors = np.tile(valentine_red, (len(heart_mesh.vertices), 1))
+    heart_mesh.visual.vertex_colors = vertex_colors
+
+    print(f"  Created heart mesh: {len(heart_mesh.faces)} faces, {heart_height}mm tall, {len(heart_mesh.vertices)} vertices")
+
+    return heart_mesh
+
+
 # ============================================================================
 # MAIN GENERATION FUNCTION
 # ============================================================================
 
-def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
+def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', pin_lat=None, pin_lon=None):
     """
     Main function to generate STL files with customizable parameters.
     Returns dictionary of generated filenames.
+
+    Args:
+        pin_lat: Latitude of pin drop for location marker (optional)
+        pin_lon: Longitude of pin drop for location marker (optional)
+        If provided, will either color the intersected building red or create a heart mesh
     """
     if config is None:
         config = ModelConfig()  # Use defaults if no config provided
 
     print(f"\n{'='*60}")
     print(f"Generating STL for location: ({lat}, {lon})")
+    if pin_lat is not None and pin_lon is not None:
+        print(f"Pin location marker: ({pin_lat}, {pin_lon})")
     print(f"Config: buildings={config.building_color}, roads={config.road_color}")
     print(f"{'='*60}\n")
 
@@ -1872,11 +1979,61 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     # IMPORTANT: Different boundaries for different feature types:
     # - Water, Roads, Footpaths: 70mm (extend to border ring inner edge, cut off cleanly)
     # - Parks, Buildings: 68mm (2mm gap for cleaner separation)
-    building_meshes, building_polygons = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
+    building_meshes, building_polygons, building_indices = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
     water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_water, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
     road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary_water, config)
     footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary_water, config, building_polygons=building_polygons) if config.footpath_enabled else []
+
+    # PIN LOCATION MARKER: Color intersected building(s) red OR create heart mesh
+    pin_marker_mesh = None
+    pin_building_mesh_indices = []  # List of mesh indices to color red (may be multiple for multipart buildings)
+    if pin_lat is not None and pin_lon is not None:
+        print(f"\n{'='*60}")
+        print(f"Processing pin location marker at ({pin_lat}, {pin_lon})")
+
+        # Convert pin coordinates to local coordinate system (meters, then scale to mm)
+        from shapely.geometry import Point
+        pin_x_m, pin_y_m = lat_lon_to_meters(pin_lat, pin_lon, lat, lon)
+        pin_x = pin_x_m * scale_factor  # Convert to mm
+        pin_y = pin_y_m * scale_factor  # Convert to mm
+        pin_shapely = Point(pin_x, pin_y)
+
+        # Check if pin intersects any building polygon
+        # For multipart buildings (like Cathedral of Learning), find ALL parts near the pin point
+        # Strategy: Find exact intersections first, then find nearby buildings within 20mm radius
+        # NOTE: building_polygons, building_meshes, and building_indices are all aligned
+
+        # First pass: exact intersections
+        for mesh_idx, (polygon, orig_idx) in enumerate(zip(building_polygons, building_indices)):
+            if polygon is not None and pin_shapely.within(polygon):
+                print(f"✓ Pin directly intersects building (original #{orig_idx}, mesh #{mesh_idx})")
+                pin_building_mesh_indices.append(mesh_idx)
+
+        # Second pass: if we hit at least one building, find nearby building parts
+        # (This handles Cathedral-style multipart buildings where tower is above but not same footprint)
+        if pin_building_mesh_indices:
+            search_radius = 20.0  # mm - search for building parts within 20mm of pin
+            pin_buffer = pin_shapely.buffer(search_radius)
+
+            for mesh_idx, (polygon, orig_idx) in enumerate(zip(building_polygons, building_indices)):
+                if mesh_idx not in pin_building_mesh_indices and polygon is not None:
+                    # Check if this building part overlaps with our search radius
+                    if polygon.intersects(pin_buffer):
+                        print(f"✓ Found nearby building part (original #{orig_idx}, mesh #{mesh_idx}) within {search_radius}mm")
+                        pin_building_mesh_indices.append(mesh_idx)
+
+        # If no building hit, create a heart mesh at pin location
+        building_hit = len(pin_building_mesh_indices) > 0
+        if building_hit:
+            print(f"✓ Pin hit {len(pin_building_mesh_indices)} building part(s) total - will color all red")
+        if not building_hit:
+            print(f"✓ Pin not on building - Creating raised heart marker at ({pin_x:.2f}, {pin_y:.2f})")
+            pin_marker_mesh = create_heart_mesh(pin_x, pin_y, scale_factor, config)
+            print(f"DEBUG: Heart mesh created - {len(pin_marker_mesh.vertices)} vertices, {len(pin_marker_mesh.faces)} faces")
+            print(f"DEBUG: Heart color sample: {pin_marker_mesh.visual.vertex_colors[0]}")
+
+        print(f"{'='*60}\n")
 
     # Apply boolean operations to handle overlapping features (prevents z-fighting)
     # Footpaths "cut through" roads and parks where they intersect
@@ -2047,11 +2204,60 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
             feature_ranges['footpath_faces'] = len(footpaths_repaired.faces)
 
     # Layer 6: Buildings (highest)
-    buildings_colored = apply_vertex_colors(building_meshes, config.building_color)
-    buildings_repaired = combine_component_mesh(buildings_colored, "Buildings")
-    if buildings_repaired:
-        all_meshes.append(buildings_repaired)
-        feature_ranges['building_faces'] = len(buildings_repaired.faces)
+    # If pin hit building(s), separate red buildings from gray buildings to avoid z-fighting
+    if pin_building_mesh_indices:
+        print(f"Pin hit {len(pin_building_mesh_indices)} building part(s) - separating red from gray buildings")
+        valentine_red = "#E63946"  # Valentine red color
+
+        # Separate buildings into two groups: gray buildings and red buildings
+        gray_buildings = []
+        red_buildings = []
+
+        for idx, mesh in enumerate(building_meshes):
+            mesh_copy = mesh.copy()
+            if idx in pin_building_mesh_indices:
+                # This is a red building - color it and save separately
+                r, g, b = hex_to_rgb(valentine_red)
+                rgba = np.array([r, g, b, 255], dtype=np.uint8)
+                vertex_colors = np.tile(rgba, (len(mesh_copy.vertices), 1))
+                mesh_copy.visual.vertex_colors = vertex_colors
+                red_buildings.append(mesh_copy)
+                print(f"  ✓ Red building part #{idx}: {len(mesh_copy.vertices)} verts, {len(mesh_copy.faces)} faces")
+            else:
+                # Regular gray building
+                gray_buildings.append(mesh_copy)
+
+        # Combine gray buildings first
+        if gray_buildings:
+            gray_buildings_colored = apply_vertex_colors(gray_buildings, config.building_color)
+            buildings_repaired = combine_component_mesh(gray_buildings_colored, "Buildings (gray)")
+            if buildings_repaired:
+                all_meshes.append(buildings_repaired)
+                feature_ranges['building_faces'] = len(buildings_repaired.faces)
+
+        # Combine red buildings and add AFTER gray buildings so they render on top
+        if red_buildings:
+            # Combine all red building parts into one mesh
+            red_buildings_combined = trimesh.util.concatenate(red_buildings)
+            # Slightly raise red buildings by 0.1mm to ensure they render on top (anti-z-fighting)
+            red_buildings_combined.vertices[:, 2] += 0.1
+            all_meshes.append(red_buildings_combined)
+            feature_ranges['red_building_faces'] = len(red_buildings_combined.faces)
+            print(f"✓ {len(red_buildings)} red building parts combined and raised 0.1mm (prevents z-fighting)")
+    else:
+        # No pin marker - color all buildings gray normally
+        buildings_colored = [mesh.copy() for mesh in building_meshes]
+        buildings_colored = apply_vertex_colors(buildings_colored, config.building_color)
+        buildings_repaired = combine_component_mesh(buildings_colored, "Buildings")
+        if buildings_repaired:
+            all_meshes.append(buildings_repaired)
+            feature_ranges['building_faces'] = len(buildings_repaired.faces)
+
+    # Layer 7: Pin marker heart (if no building was hit)
+    if pin_marker_mesh is not None:
+        print(f"DEBUG: Adding pin marker heart to model - {len(pin_marker_mesh.vertices)} verts, {len(pin_marker_mesh.faces)} faces")
+        all_meshes.append(pin_marker_mesh)
+        feature_ranges['heart_faces'] = len(pin_marker_mesh.faces)
 
     # Combine all PRE-REPAIRED meshes (NO global merge_vertices!)
     if not all_meshes:
@@ -2064,6 +2270,22 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl'):
     print(f"  Components: {len(all_meshes)}")
     print(f"  Vertices: {len(combined.vertices)}")
     print(f"  Faces: {len(combined.faces)}")
+
+    # DEBUG: Check if vertex colors survived concatenation
+    if hasattr(combined.visual, 'vertex_colors'):
+        print(f"DEBUG: Combined mesh has vertex colors: {len(combined.visual.vertex_colors)} vertices")
+        unique_colors = np.unique(combined.visual.vertex_colors, axis=0)
+        print(f"DEBUG: Unique colors in final mesh: {len(unique_colors)}")
+        # Check for red color
+        red_rgb = np.array([230, 57, 70, 255], dtype=np.uint8)
+        has_red = any(np.array_equal(c, red_rgb) for c in unique_colors)
+        print(f"DEBUG: Red color present in final mesh: {has_red}")
+        if has_red:
+            # Count how many vertices are red
+            red_verts = np.sum(np.all(combined.visual.vertex_colors == red_rgb, axis=1))
+            print(f"DEBUG: Number of red vertices: {red_verts}")
+    else:
+        print(f"DEBUG: Combined mesh has NO vertex colors!")
 
     # IMPORTANT: Do NOT call merge_vertices() here!
     # That would merge vertices across components, creating non-manifolds.
@@ -2422,12 +2644,23 @@ def generate():
         lon = float(data.get('lon'))
         radius = int(data.get('radius', 300))
 
+        # Extract pin coordinates for location marker (heart or red building)
+        pin_lat = data.get('pin_lat')
+        pin_lon = data.get('pin_lon')
+        # Convert to float if provided, otherwise None
+        if pin_lat is not None and pin_lon is not None:
+            pin_lat = float(pin_lat)
+            pin_lon = float(pin_lon)
+        else:
+            pin_lat = None
+            pin_lon = None
+
         # Extract config parameters (defaults to map2model values)
         config_dict = data.get('config', {})
         config = ModelConfig(config_dict)
 
         # Generate combined file with configuration (always generates both STL and 3MF)
-        result = generate_stl(lat, lon, radius, config)
+        result = generate_stl(lat, lon, radius, config, pin_lat=pin_lat, pin_lon=pin_lon)
 
         # Return success with filenames (STL, 3MF, PLY, Split ZIP), feature ranges, and colors
         return jsonify({

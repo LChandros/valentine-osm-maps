@@ -496,6 +496,10 @@
                         </div>
                     </div>
 
+                    <!-- Hidden fields for pin location marker -->
+                    <input type="hidden" id="pin_lat" name="pin_lat" value="">
+                    <input type="hidden" id="pin_lon" name="pin_lon" value="">
+
                     <button type="submit" id="generateBtn">Generate 3D Map STL</button>
                 </form>
             </div>
@@ -640,6 +644,7 @@
         // Import Three.js modules
         import * as THREE from 'three';
         import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // Make THREE globally available for inline onclick handlers
@@ -750,6 +755,9 @@
                 updateCircle();
                 marker.openPopup();
             });
+
+            // Initialize pin coordinates on load
+            updateInputs();
         }
 
 
@@ -757,6 +765,9 @@
         function updateInputs() {
             document.getElementById('lat').value = currentLat.toFixed(6);
             document.getElementById('lon').value = currentLon.toFixed(6);
+            // Update pin location (same as marker position - this is where the heart goes!)
+            document.getElementById('pin_lat').value = currentLat.toFixed(6);
+            document.getElementById('pin_lon').value = currentLon.toFixed(6);
         }
 
         // Update circle when radius changes
@@ -985,142 +996,38 @@
                 currentMeshes.forEach(mesh => scene.remove(mesh));
                 currentMeshes = [];
 
-                const { filename, feature_ranges, colors } = data;
-                const loader = new STLLoader();
+                const { filename, ply_filename, feature_ranges, colors } = data;
 
                 console.log('Dynamic colors:', colors);
+                console.log('Loading PLY with vertex colors:', ply_filename);
 
-                // Load the single combined STL
+                // Check if PLY filename is provided
+                if (!ply_filename) {
+                    console.error('No PLY filename provided!');
+                    throw new Error('PLY filename missing from server response');
+                }
+
+                // Use PLY loader for vertex colors (shows red building/heart marker!)
+                const loader = new PLYLoader();
+
+                // Load the PLY file (has vertex colors baked in)
                 const geometry = await new Promise((resolve, reject) => {
-                    loader.load(`/download/${filename}`, resolve, undefined, reject);
+                    loader.load(`/download/${ply_filename}`, resolve, undefined, reject);
                 });
 
-                console.log('✓ Loaded combined STL:', filename);
+                console.log('✓ Loaded PLY with vertex colors:', ply_filename);
+                console.log('Geometry has colors:', geometry.attributes.color !== undefined);
 
-                // Create material groups based on face ranges
-                // The backend concatenates in this order:
-                // 1. Base + heart
-                // 2. Buildings
-                // 3. Water
-                // 4. Parks
-                // 5. Roads
-
-                let faceIndex = 0;
-                const groups = [];
-
-                // LAYER ORDER matches backend: Water → Base → Parks → Roads → Footpaths → Buildings
-
-                // Group 0: Water (lowest layer - blue)
-                if (feature_ranges.water_faces > 0) {
-                    groups.push({
-                        start: faceIndex * 3,
-                        count: feature_ranges.water_faces * 3,
-                        materialIndex: 0
-                    });
-                    faceIndex += feature_ranges.water_faces;
-                }
-
-                // Group 1: Base plate (gray)
-                if (feature_ranges.base_and_heart_faces > 0) {
-                    groups.push({
-                        start: faceIndex * 3,
-                        count: feature_ranges.base_and_heart_faces * 3,
-                        materialIndex: 1
-                    });
-                    faceIndex += feature_ranges.base_and_heart_faces;
-                }
-
-                // Group 2: Parks (green)
-                if (feature_ranges.park_faces > 0) {
-                    groups.push({
-                        start: faceIndex * 3,
-                        count: feature_ranges.park_faces * 3,
-                        materialIndex: 2
-                    });
-                    faceIndex += feature_ranges.park_faces;
-                }
-
-                // Group 3: Roads (black)
-                if (feature_ranges.road_faces > 0) {
-                    groups.push({
-                        start: faceIndex * 3,
-                        count: feature_ranges.road_faces * 3,
-                        materialIndex: 3
-                    });
-                    faceIndex += feature_ranges.road_faces;
-                }
-
-                // Group 4: Footpaths (black)
-                if (feature_ranges.footpath_faces > 0) {
-                    groups.push({
-                        start: faceIndex * 3,
-                        count: feature_ranges.footpath_faces * 3,
-                        materialIndex: 4
-                    });
-                    faceIndex += feature_ranges.footpath_faces;
-                }
-
-                // Group 5: Buildings (highest layer - gray)
-                if (feature_ranges.building_faces > 0) {
-                    groups.push({
-                        start: faceIndex * 3,
-                        count: feature_ranges.building_faces * 3,
-                        materialIndex: 5
-                    });
-                    faceIndex += feature_ranges.building_faces;
-                }
-
-                // Clear existing groups and add our groups
-                geometry.clearGroups();
-                groups.forEach(g => {
-                    geometry.addGroup(g.start, g.count, g.materialIndex);
+                // Use vertex colors from PLY file (includes red building/heart marker!)
+                const material = new THREE.MeshPhongMaterial({
+                    vertexColors: true,  // Enable vertex colors from PLY
+                    specular: 0x222222,
+                    shininess: 20,
+                    flatShading: false
                 });
 
-                // Create materials array with dynamic colors from settings
-                // LAYER ORDER: Water → Base → Parks → Roads → Footpaths → Buildings
-                const materials = [
-                    // 0: Water (lowest layer - shiny, semi-transparent)
-                    new THREE.MeshPhongMaterial({
-                        color: new THREE.Color(colors.water),
-                        specular: 0x555555,
-                        shininess: 50,
-                        transparent: true,
-                        opacity: 0.8
-                    }),
-                    // 1: Base plate (gray)
-                    new THREE.MeshPhongMaterial({
-                        color: 0xC7C7C8,  // Light gray base
-                        specular: 0x111111,
-                        shininess: 20
-                    }),
-                    // 2: Parks (green)
-                    new THREE.MeshPhongMaterial({
-                        color: new THREE.Color(colors.park),
-                        specular: 0x111111,
-                        shininess: 20
-                    }),
-                    // 3: Roads (black)
-                    new THREE.MeshPhongMaterial({
-                        color: new THREE.Color(colors.road),
-                        specular: 0x111111,
-                        shininess: 10
-                    }),
-                    // 4: Footpaths (black)
-                    new THREE.MeshPhongMaterial({
-                        color: new THREE.Color(colors.footpath),
-                        specular: 0x111111,
-                        shininess: 15
-                    }),
-                    // 5: Buildings (highest layer - gray)
-                    new THREE.MeshPhongMaterial({
-                        color: new THREE.Color(colors.building),
-                        specular: 0x111111,
-                        shininess: 20
-                    })
-                ];
-
-                // Create mesh with multiple materials
-                const mesh = new THREE.Mesh(geometry, materials);
+                // Create mesh with vertex color material
+                const mesh = new THREE.Mesh(geometry, material);
 
                 // Rotate to correct orientation (STL is Z-up, Three.js uses Y-up)
                 mesh.rotation.x = -Math.PI / 2;
@@ -1269,6 +1176,8 @@
             const lat = parseFloat(document.getElementById('lat').value);
             const lon = parseFloat(document.getElementById('lon').value);
             const radius = parseInt(document.getElementById('radius').value);
+            const pin_lat = parseFloat(document.getElementById('pin_lat').value);
+            const pin_lon = parseFloat(document.getElementById('pin_lon').value);
 
             // Validate inputs
             if (isNaN(lat) || isNaN(lon)) {
@@ -1289,7 +1198,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ lat, lon, radius, config })
+                    body: JSON.stringify({ lat, lon, radius, pin_lat, pin_lon, config })
                 });
 
                 const data = await response.json();
@@ -1302,9 +1211,10 @@
                         split_zip: data['split_zip']
                     });
 
-                    // Load 3D preview with STL file, feature ranges, and colors
+                    // Load 3D preview with PLY file (has vertex colors for red building/heart!)
                     load3DPreview({
-                        filename: data.filename,  // Use STL for preview
+                        filename: data.filename,  // STL filename (still needed for backward compat)
+                        ply_filename: data['ply_filename'],  // PLY filename with vertex colors
                         feature_ranges: data.feature_ranges,
                         colors: data.colors  // Dynamic colors from config
                     });
