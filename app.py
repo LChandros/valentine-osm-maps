@@ -2173,6 +2173,40 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
                 # Stop after first hit (we've already added the entire group if applicable)
                 break
 
+        # VERTICAL COLUMN DETECTION: Find any building parts above the red buildings
+        # If a building part's footprint intersects with ANY red building's footprint,
+        # it should also be colored red (handles tower sections above bases)
+        if pin_building_mesh_indices:
+            print(f"\n  Checking for vertical columns above {len(pin_building_mesh_indices)} red building(s)...")
+            initial_red_count = len(pin_building_mesh_indices)
+
+            # Keep expanding until no new parts are found
+            changed = True
+            iteration = 0
+            while changed:
+                changed = False
+                iteration += 1
+                print(f"    Iteration {iteration}: Checking {len(building_polygons)} building parts...")
+
+                for mesh_idx, polygon in enumerate(building_polygons):
+                    # Skip if already red or no polygon
+                    if mesh_idx in pin_building_mesh_indices or polygon is None:
+                        continue
+
+                    # Check if this part's footprint intersects ANY red building's footprint
+                    for red_idx in pin_building_mesh_indices:
+                        red_polygon = building_polygons[red_idx]
+                        if red_polygon is not None and polygon.intersects(red_polygon):
+                            pin_building_mesh_indices.append(mesh_idx)
+                            print(f"      ✓ Part #{mesh_idx} sits above red part #{red_idx} - adding to red buildings")
+                            changed = True
+                            break
+
+            if len(pin_building_mesh_indices) > initial_red_count:
+                print(f"  ✓ Vertical column detection added {len(pin_building_mesh_indices) - initial_red_count} more parts")
+            else:
+                print(f"  • No additional vertical parts found")
+
         # If no building hit, create a heart mesh at pin location
         building_hit = len(pin_building_mesh_indices) > 0
         if building_hit:
