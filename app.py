@@ -419,6 +419,7 @@ def query_osm_buildings(lat, lon, radius_meters=300):
     bbox = create_bbox(lat, lon, radius_meters)
 
     # Overpass API query - include building:part for complex structures
+    # Use "out meta" to get relation membership for building:parts
     query = f"""
     [out:json][timeout:25];
     (
@@ -587,7 +588,8 @@ def query_osm_buildings(lat, lon, radius_meters=300):
                 'height': height,
                 'min_height': min_height,
                 'tags': tags,
-                'is_building_part': True
+                'is_building_part': True,
+                'osm_id': element['id']  # Store OSM ID for debugging/grouping
             })
 
     # Count regular buildings vs parts
@@ -1995,11 +1997,16 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
     # Result: building_part_groups[mesh_idx] = list of all mesh indices in that building's group
     building_part_groups = {}  # mesh_idx -> list of mesh indices in the same multipart building
 
+    print(f"\n=== Building:part Detection ===")
+    print(f"Total meshes: {len(is_building_parts)}")
+    print(f"Building:part count: {sum(is_building_parts)}")
+
     if any(is_building_parts):  # Only if we have any building:parts
         from shapely.geometry import Point
 
         # Find all building:part elements
         part_indices = [i for i, is_part in enumerate(is_building_parts) if is_part]
+        print(f"Part indices to group: {part_indices}")
 
         # Build a mapping from mesh_idx back to original building for height checking
         # building_indices[mesh_idx] = original_building_idx
@@ -2017,12 +2024,14 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
             if poly1 is None or poly2 is None:
                 return False
 
-            # Check 1: Do they overlap or touch in 2D?
-            if poly1.touches(poly2) or poly1.overlaps(poly2) or poly1.intersects(poly2):
+            # Check 1: Do they overlap in 2D?
+            # NOTE: NOT using .touches() or .intersects() because row buildings touch/share walls but are separate
+            # ONLY use .overlaps() which requires actual area overlap (not just shared boundary)
+            if poly1.overlaps(poly2):
+                print(f"    ✓ Parts {idx1} and {idx2} overlap in 2D")
                 return True
 
-            # Check 2: Are they vertically stacked?
-            # Get original building data for height info
+            # Get original building data for height/proximity checks
             orig_idx1 = building_indices[idx1]
             orig_idx2 = building_indices[idx2]
             building1 = buildings[orig_idx1]
@@ -2033,17 +2042,49 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
             height2 = building2.get('height', 0)
             min_height2 = building2.get('min_height', 0)
 
+            # Check 1.5: Do they share the same building name AND are nearby?
+            # Use BOTH name AND proximity to avoid grouping separate buildings in a complex
+            name1 = building1.get('tags', {}).get('name', '')
+            name2 = building2.get('tags', {}).get('name', '')
+
+            if name1 and name2 and name1 == name2:
+                # Same name - but also check proximity to avoid grouping separate buildings
+                # in a complex that share a name (e.g., row buildings in same development)
+                distance = poly1.distance(poly2)
+                if distance < 20.0:  # Within 20mm
+                    print(f"    ✓ Parts {idx1} and {idx2} share name '{name1}' AND nearby (distance: {distance:.1f}mm)")
+                    return True
+                else:
+                    print(f"    ✗ Parts {idx1} and {idx2} share name '{name1}' but too far apart (distance: {distance:.1f}mm)")
+
+            # Check 1.6: REMOVED - proximity-only check was grouping touching row buildings
+            # We only group by: overlap, name+proximity, or vertical stacking
+            # This means Cathedral parts won't group unless they have names or overlap
+
+            # Check 2: Are they vertically stacked?
+
             # Check if vertically adjacent (one ends where other begins)
             vertically_adjacent = (
                 abs(height1 - min_height2) < 0.1 or  # building1 top touches building2 bottom
                 abs(height2 - min_height1) < 0.1     # building2 top touches building1 bottom
             )
 
-            # For vertical stacking, also require some footprint overlap
+            # For vertical stacking, also require footprints to intersect
             if vertically_adjacent:
-                # Check if footprints overlap (not just touch - they need to share area)
+                # Use .intersects() here (not .overlaps()) because tower sections may have
+                # identical footprints (overlaps() returns False for identical polygons!)
+                # This is safe because we already checked vertical adjacency (different heights)
                 if poly1.intersects(poly2):
+                    print(f"    ✓ Parts {idx1} (h:{min_height1:.1f}-{height1:.1f}m) and {idx2} (h:{min_height2:.1f}-{height2:.1f}m) vertically stacked")
                     return True
+                else:
+                    print(f"    ✗ Parts {idx1} (h:{min_height1:.1f}-{height1:.1f}m) and {idx2} (h:{min_height2:.1f}-{height2:.1f}m) vertically adjacent but footprints don't intersect")
+            else:
+                # Show why they're not vertically adjacent
+                height_diff1 = abs(height1 - min_height2)
+                height_diff2 = abs(height2 - min_height1)
+                if height_diff1 < 5.0 or height_diff2 < 5.0:  # Only log if they're close
+                    print(f"    ✗ Parts {idx1} (h:{min_height1:.1f}-{height1:.1f}m) and {idx2} (h:{min_height2:.1f}-{height2:.1f}m) not vertically adjacent (diff: {min(height_diff1, height_diff2):.1f}m)")
 
             return False
 
@@ -2068,10 +2109,13 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         while remaining:
             # Start new group with next unprocessed part
             idx = remaining.pop()
+            print(f"\n  Starting new group with part {idx}...")
             group = [idx]
 
             # Expand group recursively
             expand_group(group, remaining)
+
+            print(f"  → Final group: {group}")
 
             # Store the group for each member
             for member_idx in group:
@@ -2585,9 +2629,10 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         f.write("# MTL file for Bambu Studio multi-color import\n")
         f.write("# Generated by Valentine's Day Map Generator\n\n")
         for mat_name, material in materials.items():
-            # SimpleMaterial stores colors in 0-255 range, MTL needs 0-1 range
-            ka = [material.ambient[0]/255.0, material.ambient[1]/255.0, material.ambient[2]/255.0]
-            kd = [material.diffuse[0]/255.0, material.diffuse[1]/255.0, material.diffuse[2]/255.0]
+            # SimpleMaterial already stores colors in 0-1 range (230/255, etc.)
+            # MTL format also expects 0-1 range, so use directly
+            ka = material.ambient[:3]  # Take first 3 values (RGB, skip alpha)
+            kd = material.diffuse[:3]
 
             f.write(f"newmtl {mat_name}\n")
             f.write(f"Ka {ka[0]:.6f} {ka[1]:.6f} {ka[2]:.6f}\n")
@@ -2601,8 +2646,18 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
     print(f"  Materials defined: {len(materials)} ({', '.join(materials.keys())})")
     print(f"  Total vertices: {len(obj_combined.vertices)}, faces: {len(obj_combined.faces)}")
 
-    # Always generate split export files for multi-color printing
+    # Create ZIP file containing both OBJ and MTL for easy Blender import
     import zipfile
+    obj_zip_filename = f'map_{timestamp}_obj.zip'
+    obj_zip_filepath = os.path.join(OUTPUT_DIR, obj_zip_filename)
+
+    print(f"\nCreating OBJ+MTL ZIP for Blender import...")
+    with zipfile.ZipFile(obj_zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(obj_filepath, obj_filename)
+        zipf.write(mtl_filepath, mtl_filename)
+    print(f"✓ OBJ+MTL ZIP created: {obj_zip_filename}")
+
+    # Always generate split export files for multi-color printing
     zip_filename = f'map_{timestamp}_split.zip'
     zip_filepath = os.path.join(OUTPUT_DIR, zip_filename)
 
@@ -2758,6 +2813,7 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         'ply_filename': ply_filename,
         'obj_filename': obj_filename,
         'mtl_filename': mtl_filename,
+        'obj_zip': obj_zip_filename,  # ZIP containing OBJ+MTL for Blender
         'split_zip': zip_filename,
         'feature_ranges': feature_ranges
     }
@@ -2800,13 +2856,14 @@ def generate():
         # Generate combined file with configuration (always generates both STL and 3MF)
         result = generate_stl(lat, lon, radius, config, pin_lat=pin_lat, pin_lon=pin_lon)
 
-        # Return success with filenames (STL, 3MF, PLY, Split ZIP), feature ranges, and colors
+        # Return success with filenames (STL, 3MF, PLY, OBJ ZIP, Split ZIP), feature ranges, and colors
         return jsonify({
             'success': True,
             'filename': result['stl_filename'],  # For 3D preview
             '3mf_filename': result['3mf_filename'],  # For download
             'ply_filename': result['ply_filename'],  # For download (full color)
-            'obj_filename': result['obj_filename'],  # For download (Blender/Bambu)
+            'obj_filename': result['obj_filename'],  # Individual OBJ (legacy)
+            'obj_zip': result['obj_zip'],  # ZIP with OBJ+MTL (recommended for Blender)
             'split_zip': result['split_zip'],  # For multi-color printing
             'feature_ranges': result['feature_ranges'],
             'colors': {
