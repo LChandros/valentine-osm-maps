@@ -863,10 +863,11 @@ def create_pyramid_roof(polygon, base_z, roof_height):
 def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, circle_boundary=None, config=None):
     """
     Convert building footprints to 3D meshes with configurable parameters.
-    Returns tuple of (meshes, building_polygons, building_indices) where:
+    Returns tuple of (meshes, building_polygons, building_indices, is_building_parts) where:
     - meshes: list of Trimesh objects
     - building_polygons: list of 2D Shapely polygons for intersection detection
     - building_indices: list of original building indices (for matching pin to mesh)
+    - is_building_parts: list of booleans indicating if each mesh is a building:part element
     """
     if config is None:
         config = ModelConfig()
@@ -874,6 +875,7 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
     meshes = []
     building_polygons = []  # Collect 2D footprints for subtracting from footpaths
     building_indices = []  # Track original building index for each polygon/mesh
+    is_building_parts = []  # Track if each mesh is a building:part (for multipart detection)
 
     for i, building in enumerate(buildings):
         try:
@@ -937,6 +939,7 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
             # Save polygon and original index for pin intersection detection
             building_polygons.append(polygon)
             building_indices.append(i)  # Track original building index
+            is_building_parts.append(building.get('is_building_part', False))  # Track if this is a building:part
 
             # Extrude to 3D with vertical exaggeration
             height_meters = building['height']
@@ -1097,7 +1100,7 @@ def create_building_meshes(buildings, center_lat, center_lon, scale_factor=1.0, 
             continue
 
     print(f"Created {len(meshes)} valid building meshes ({len(building_polygons)} polygons for footpath clipping)")
-    return meshes, building_polygons, building_indices
+    return meshes, building_polygons, building_indices, is_building_parts
 
 
 def create_heart_mesh(size_mm=8, height_mm=5):
@@ -1979,11 +1982,109 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
     # IMPORTANT: Different boundaries for different feature types:
     # - Water, Roads, Footpaths: 70mm (extend to border ring inner edge, cut off cleanly)
     # - Parks, Buildings: 68mm (2mm gap for cleaner separation)
-    building_meshes, building_polygons, building_indices = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
+    building_meshes, building_polygons, building_indices, is_building_parts = create_building_meshes(buildings, lat, lon, scale_factor, circle_boundary, config)
     water_meshes, water_polygons = create_water_meshes(water_features, lat, lon, scale_factor, circle_boundary_water, config)
     park_meshes = create_park_meshes(parks, lat, lon, scale_factor, circle_boundary, config)
     road_meshes = create_road_meshes(roads, lat, lon, scale_factor, circle_boundary_water, config)
     footpath_meshes = create_footpath_meshes(footpaths, lat, lon, scale_factor, circle_boundary_water, config, building_polygons=building_polygons) if config.footpath_enabled else []
+
+    # PRE-DETECTION: Group building:parts that belong together (multipart buildings like Cathedral)
+    # Strategy: Group building:parts that either:
+    #   1. OVERLAP or TOUCH in 2D footprint (horizontally connected)
+    #   2. Are VERTICALLY STACKED (one's height = another's min_height, with overlapping footprints)
+    # Result: building_part_groups[mesh_idx] = list of all mesh indices in that building's group
+    building_part_groups = {}  # mesh_idx -> list of mesh indices in the same multipart building
+
+    if any(is_building_parts):  # Only if we have any building:parts
+        from shapely.geometry import Point
+
+        # Find all building:part elements
+        part_indices = [i for i, is_part in enumerate(is_building_parts) if is_part]
+
+        # Build a mapping from mesh_idx back to original building for height checking
+        # building_indices[mesh_idx] = original_building_idx
+        # buildings[original_building_idx] has height/min_height
+
+        # Group building:parts using recursive grouping to catch transitive relationships
+        # (e.g., base connects to middle via vertical stack, middle connects to top via overlap)
+        processed = set()
+
+        def should_group(idx1, idx2):
+            """Check if two building:parts should be grouped together"""
+            poly1 = building_polygons[idx1]
+            poly2 = building_polygons[idx2]
+
+            if poly1 is None or poly2 is None:
+                return False
+
+            # Check 1: Do they overlap or touch in 2D?
+            if poly1.touches(poly2) or poly1.overlaps(poly2) or poly1.intersects(poly2):
+                return True
+
+            # Check 2: Are they vertically stacked?
+            # Get original building data for height info
+            orig_idx1 = building_indices[idx1]
+            orig_idx2 = building_indices[idx2]
+            building1 = buildings[orig_idx1]
+            building2 = buildings[orig_idx2]
+
+            height1 = building1.get('height', 0)
+            min_height1 = building1.get('min_height', 0)
+            height2 = building2.get('height', 0)
+            min_height2 = building2.get('min_height', 0)
+
+            # Check if vertically adjacent (one ends where other begins)
+            vertically_adjacent = (
+                abs(height1 - min_height2) < 0.1 or  # building1 top touches building2 bottom
+                abs(height2 - min_height1) < 0.1     # building2 top touches building1 bottom
+            )
+
+            # For vertical stacking, also require some footprint overlap
+            if vertically_adjacent:
+                # Check if footprints overlap (not just touch - they need to share area)
+                if poly1.intersects(poly2):
+                    return True
+
+            return False
+
+        # Recursive group expansion
+        def expand_group(group, remaining):
+            """Recursively expand a group by finding connected parts"""
+            changed = True
+            while changed:
+                changed = False
+                for idx in list(remaining):
+                    for group_member in group:
+                        if should_group(idx, group_member):
+                            group.append(idx)
+                            remaining.remove(idx)
+                            changed = True
+                            break
+                    if changed:
+                        break
+
+        remaining = set(part_indices)
+
+        while remaining:
+            # Start new group with next unprocessed part
+            idx = remaining.pop()
+            group = [idx]
+
+            # Expand group recursively
+            expand_group(group, remaining)
+
+            # Store the group for each member
+            for member_idx in group:
+                building_part_groups[member_idx] = group
+                processed.add(member_idx)
+
+        print(f"\n=== Multipart Building Groups ===")
+        unique_groups = set()
+        for idx, group in building_part_groups.items():
+            group_tuple = tuple(sorted(group))
+            if group_tuple not in unique_groups:
+                unique_groups.add(group_tuple)
+                print(f"  Group with {len(group)} parts: {group}")
 
     # PIN LOCATION MARKER: Color intersected building(s) red OR create heart mesh
     pin_marker_mesh = None
@@ -2000,18 +2101,38 @@ def generate_stl(lat, lon, radius_meters=300, config=None, export_format='stl', 
         pin_shapely = Point(pin_x, pin_y)
 
         # Check if pin intersects any building polygon
-        # Strategy: ONLY exact intersection - pin point must be within the building footprint
-        # This ensures we only color the specific building the user clicked on
-        # NOTE: building_polygons, building_meshes, and building_indices are all aligned
-        for mesh_idx, (polygon, orig_idx) in enumerate(zip(building_polygons, building_indices)):
+        # Strategy: Find exact intersection, then check if it belongs to a multipart building group
+        # - If building is in a group (multipart building like Cathedral), color entire group
+        # - If building is standalone (like Shady Grove), color only that building
+        # NOTE: building_polygons, building_meshes, building_indices, is_building_parts are all aligned
+
+        # Find exact intersections
+        for mesh_idx, (polygon, orig_idx, is_part) in enumerate(zip(building_polygons, building_indices, is_building_parts)):
             if polygon is not None and pin_shapely.within(polygon):
-                print(f"✓ Pin intersects building (original #{orig_idx}, mesh #{mesh_idx})")
-                pin_building_mesh_indices.append(mesh_idx)
+                print(f"✓ Pin intersects building (original #{orig_idx}, mesh #{mesh_idx}, is_part={is_part})")
+
+                # Check if this building is part of a multipart building group
+                if mesh_idx in building_part_groups:
+                    # This building belongs to a multipart structure (like Cathedral)
+                    # Add ALL parts of this group to the red list
+                    group = building_part_groups[mesh_idx]
+                    print(f"  ✓ Building is part of multipart structure with {len(group)} parts")
+                    for part_idx in group:
+                        if part_idx not in pin_building_mesh_indices:
+                            pin_building_mesh_indices.append(part_idx)
+                            print(f"    ✓ Adding part #{part_idx} to red buildings")
+                else:
+                    # Standalone building (regular building or isolated building:part)
+                    pin_building_mesh_indices.append(mesh_idx)
+                    print(f"  ✓ Standalone building - coloring only this building")
+
+                # Stop after first hit (we've already added the entire group if applicable)
+                break
 
         # If no building hit, create a heart mesh at pin location
         building_hit = len(pin_building_mesh_indices) > 0
         if building_hit:
-            print(f"✓ Pin hit {len(pin_building_mesh_indices)} building part(s) - will color all red")
+            print(f"✓ Pin hit {len(pin_building_mesh_indices)} building part(s) total - will color all red")
         if not building_hit:
             print(f"✓ Pin not on building - Creating raised heart marker at ({pin_x:.2f}, {pin_y:.2f})")
             pin_marker_mesh = create_heart_mesh(pin_x, pin_y, scale_factor, config)
@@ -2685,6 +2806,7 @@ def generate():
             'filename': result['stl_filename'],  # For 3D preview
             '3mf_filename': result['3mf_filename'],  # For download
             'ply_filename': result['ply_filename'],  # For download (full color)
+            'obj_filename': result['obj_filename'],  # For download (Blender/Bambu)
             'split_zip': result['split_zip'],  # For multi-color printing
             'feature_ranges': result['feature_ranges'],
             'colors': {
